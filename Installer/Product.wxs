@@ -187,8 +187,8 @@
         </Control>
         <Control Id="TokenEdit" Type="Edit" X="15" Y="200" Width="340" Height="21" Property="AGENT_TOKEN" Password="yes" />
         
-        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="Next >" />
-        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="< Back" />
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="Next &gt;" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="&lt; Back" />
         <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="Cancel" />
       </Dialog>
       
