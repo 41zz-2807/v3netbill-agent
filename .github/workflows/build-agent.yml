@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'v3NetbillAgent/**'
+      - '**'
   workflow_dispatch:
   # Tag-based release (optional)
   # release:
@@ -12,11 +12,11 @@ on:
 
 env:
   DOTNET_VERSION: '8.0.x'
-  SOLUTION_FILE: 'v3NetbillAgent/v3NetbillAgent.sln'
-  AGENT_CORE_PROJECT: 'v3NetbillAgent/Agent.Core/Agent.Core.csproj'
-  AGENT_OVERLAY_PROJECT: 'v3NetbillAgent/Agent.Overlay/Agent.Overlay.csproj'
-  AGENT_SERVICE_PROJECT: 'v3NetbillAgent/Agent.Service/Agent.Service.csproj'
-  INSTALLER_WXS: 'v3NetbillAgent/Installer/Product.wxs'
+  SOLUTION_FILE: 'v3NetbillAgent.sln'
+  AGENT_CORE_PROJECT: 'Agent.Core/Agent.Core.csproj'
+  AGENT_OVERLAY_PROJECT: 'Agent.Overlay/Agent.Overlay.csproj'
+  AGENT_SERVICE_PROJECT: 'Agent.Service/Agent.Service.csproj'
+  INSTALLER_WXS: 'Installer/Product.wxs'
   WIX_VERSION: '4.0.5'
 
 jobs:
@@ -85,14 +85,14 @@ jobs:
             -cg ServiceComponents `
             -gg -sfrag -srd -dr INSTALLFOLDER `
             -var var.AgentServicePublishDir `
-            -out ${{ github.workspace }}/v3NetbillAgent/Installer/ServiceComponents.wxs
+            -out ${{ github.workspace }}/Installer/ServiceComponents.wxs
           
           # Generate component group for Agent.Overlay publish output
           heat dir ${{ github.workspace }}/artifacts/Agent.Overlay `
             -cg OverlayComponents `
             -gg -sfrag -srd -dr INSTALLFOLDER `
             -var var.AgentOverlayPublishDir `
-            -out ${{ github.workspace }}/v3NetbillAgent/Installer/OverlayComponents.wxs
+            -out ${{ github.workspace }}/Installer/OverlayComponents.wxs
         shell: pwsh
         working-directory: ${{ github.workspace }}
       
@@ -103,10 +103,10 @@ jobs:
             -dAgentServicePublishDir="${{ github.workspace }}\artifacts\Agent.Service\" `
             -dAgentOverlayPublishDir="${{ github.workspace }}\artifacts\Agent.Overlay\" `
             -ext WixToolset.Util.wixext `
-            -out ${{ github.workspace }}/v3NetbillAgent/Installer/ `
+            -out ${{ github.workspace }}/Installer/ `
             ${{ env.INSTALLER_WXS }} `
-            ${{ github.workspace }}/v3NetbillAgent/Installer/ServiceComponents.wxs `
-            ${{ github.workspace }}/v3NetbillAgent/Installer/OverlayComponents.wxs
+            ${{ github.workspace }}/Installer/ServiceComponents.wxs `
+            ${{ github.workspace }}/Installer/OverlayComponents.wxs
         shell: pwsh
         working-directory: ${{ github.workspace }}
       
@@ -116,9 +116,9 @@ jobs:
             -ext WixToolset.Util.wixext `
             -ext WixToolset.UI.wixext `
             -out ${{ github.workspace }}/artifacts/v3NetbillAgentSetup.msi `
-            ${{ github.workspace }}/v3NetbillAgent/Installer/Product.wixobj `
-            ${{ github.workspace }}/v3NetbillAgent/Installer/ServiceComponents.wixobj `
-            ${{ github.workspace }}/v3NetbillAgent/Installer/OverlayComponents.wixobj
+            ${{ github.workspace }}/Installer/Product.wixobj `
+            ${{ github.workspace }}/Installer/ServiceComponents.wixobj `
+            ${{ github.workspace }}/Installer/OverlayComponents.wixobj
         shell: pwsh
         working-directory: ${{ github.workspace }}
       
