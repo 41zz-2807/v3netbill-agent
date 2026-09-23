@@ -1,0 +1,154 @@
+name: Build v3NetbillAgent
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'v3NetbillAgent/**'
+  workflow_dispatch:
+  # Tag-based release (optional)
+  # release:
+  #   types: [created]
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  SOLUTION_FILE: 'v3NetbillAgent/v3NetbillAgent.sln'
+  AGENT_CORE_PROJECT: 'v3NetbillAgent/Agent.Core/Agent.Core.csproj'
+  AGENT_OVERLAY_PROJECT: 'v3NetbillAgent/Agent.Overlay/Agent.Overlay.csproj'
+  AGENT_SERVICE_PROJECT: 'v3NetbillAgent/Agent.Service/Agent.Service.csproj'
+  INSTALLER_WXS: 'v3NetbillAgent/Installer/Product.wxs'
+  WIX_VERSION: '4.0.5'
+
+jobs:
+  build-agent:
+    name: Build Agent (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    
+    steps:
+      # ----- Checkout -----
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      # ----- Setup .NET 8 -----
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      
+      # ----- Restore -----
+      - name: Restore dependencies
+        run: dotnet restore ${{ env.SOLUTION_FILE }}
+        working-directory: ${{ github.workspace }}
+      
+      # ----- Build Agent.Core (verify compiles) -----
+      - name: Build Agent.Core
+        run: dotnet build ${{ env.AGENT_CORE_PROJECT }} -c Release --no-restore
+        working-directory: ${{ github.workspace }}
+      
+      # ----- Publish Agent.Service (self-contained win-x64) -----
+      - name: Publish Agent.Service
+        run: |
+          dotnet publish ${{ env.AGENT_SERVICE_PROJECT }} `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=false `
+            -p:PublishTrimmed=false `
+            -o ${{ github.workspace }}/artifacts/Agent.Service
+        working-directory: ${{ github.workspace }}
+      
+      # ----- Publish Agent.Overlay (self-contained win-x64) -----
+      - name: Publish Agent.Overlay
+        run: |
+          dotnet publish ${{ env.AGENT_OVERLAY_PROJECT }} `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=false `
+            -p:PublishTrimmed=false `
+            -o ${{ github.workspace }}/artifacts/Agent.Overlay
+        working-directory: ${{ github.workspace }}
+      
+      # ----- Install WiX Toolset v4 -----
+      - name: Install WiX Toolset
+        run: |
+          dotnet tool install --global wix --version ${{ env.WIX_VERSION }}
+          echo "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        shell: pwsh
+      
+      # ----- Generate WiX fragments from publish output (heat) -----
+      - name: Generate WiX fragments (heat)
+        run: |
+          # Generate component group for Agent.Service publish output
+          heat dir ${{ github.workspace }}/artifacts/Agent.Service `
+            -cg ServiceComponents `
+            -gg -sfrag -srd -dr INSTALLFOLDER `
+            -var var.AgentServicePublishDir `
+            -out ${{ github.workspace }}/v3NetbillAgent/Installer/ServiceComponents.wxs
+          
+          # Generate component group for Agent.Overlay publish output
+          heat dir ${{ github.workspace }}/artifacts/Agent.Overlay `
+            -cg OverlayComponents `
+            -gg -sfrag -srd -dr INSTALLFOLDER `
+            -var var.AgentOverlayPublishDir `
+            -out ${{ github.workspace }}/v3NetbillAgent/Installer/OverlayComponents.wxs
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+      
+      # ----- Build MSI with WiX (candle + light) -----
+      - name: Build MSI (candle)
+        run: |
+          candle `
+            -dAgentServicePublishDir="${{ github.workspace }}\artifacts\Agent.Service\" `
+            -dAgentOverlayPublishDir="${{ github.workspace }}\artifacts\Agent.Overlay\" `
+            -ext WixToolset.Util.wixext `
+            -out ${{ github.workspace }}/v3NetbillAgent/Installer/ `
+            ${{ env.INSTALLER_WXS }} `
+            ${{ github.workspace }}/v3NetbillAgent/Installer/ServiceComponents.wxs `
+            ${{ github.workspace }}/v3NetbillAgent/Installer/OverlayComponents.wxs
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+      
+      - name: Build MSI (light)
+        run: |
+          light `
+            -ext WixToolset.Util.wixext `
+            -ext WixToolset.UI.wixext `
+            -out ${{ github.workspace }}/artifacts/v3NetbillAgentSetup.msi `
+            ${{ github.workspace }}/v3NetbillAgent/Installer/Product.wixobj `
+            ${{ github.workspace }}/v3NetbillAgent/Installer/ServiceComponents.wixobj `
+            ${{ github.workspace }}/v3NetbillAgent/Installer/OverlayComponents.wixobj
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+      
+      # ----- Verify MSI -----
+      - name: Verify MSI
+        run: |
+          # Check MSI contents
+          msiexec /a "${{ github.workspace }}/artifacts/v3NetbillAgentSetup.msi" /qn TARGETDIR="${{ github.workspace }}/artifacts/msi-extract" 2>&1 | Out-Null
+          # Verify key files exist
+          Test-Path "${{ github.workspace }}/artifacts/msi-extract/Agent.Service.exe" | Should -Be $true
+          Test-Path "${{ github.workspace }}/artifacts/msi-extract/Agent.Overlay.exe" | Should -Be $true
+          Test-Path "${{ github.workspace }}/artifacts/msi-extract/appsettings.json" | Should -Be $true
+          Write-Host "MSI verification passed"
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+      
+      # ----- Upload Artifact -----
+      - name: Upload MSI Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: v3NetbillAgentSetup
+          path: ${{ github.workspace }}/artifacts/v3NetbillAgentSetup.msi
+          retention-days: 30
+      
+      # ----- Also upload publish outputs for debugging -----
+      - name: Upload Publish Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: v3NetbillAgent-Publish
+          path: |
+            ${{ github.workspace }}/artifacts/Agent.Service/**
+            ${{ github.workspace }}/artifacts/Agent.Overlay/**
+          retention-days: 7
