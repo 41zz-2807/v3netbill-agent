@@ -184,8 +184,17 @@ public class Worker : BackgroundService
             try
             {
                 _pipeServer = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Message, PipeOptions.Asynchronous);
-                // Izinkan semua user (termasuk user sesi interaktif) untuk connect ke pipe service.
-                SecureNamedPipe.GrantEveryoneAccess(pipeName);
+                try
+                {
+                    // Izinkan semua user (termasuk user sesi interaktif) untuk connect ke pipe service.
+                    SecureNamedPipe.GrantEveryoneAccess(pipeName);
+                }
+                catch (Exception aclEx)
+                {
+                    // Jangan sampai memblokir server — tanpa ACL overlay mungkin gagal connect,
+                    // tapi server tetap harus menunggu koneksi.
+                    _logger.LogWarning(aclEx, "Gagal set ACL pada pipe — overlay mungkin tidak bisa connect");
+                }
                 _logger.LogDebug("Named pipe server waiting for connection...");
                 await _pipeServer.WaitForConnectionAsync(ct);
                 _logger.LogInformation("Overlay connected via named pipe");
@@ -303,6 +312,16 @@ public class Worker : BackgroundService
     private void WatchdogCallback(object? state)
     {
         if (_currentState.State != SessionState.LockState.Locked) return;
+
+        // Mode maintenance (emergency stop dari overlay): jangan luncurkan ulang.
+        string stopFlag = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments),
+            "v3netbill-agent-stop.flag");
+        if (File.Exists(stopFlag))
+        {
+            _logger.LogInformation("Stop flag ada — overlay tidak diluncurkan ulang (mode maintenance)");
+            return;
+        }
 
         try
         {

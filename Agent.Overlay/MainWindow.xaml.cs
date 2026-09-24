@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Runtime.InteropServices;
@@ -36,6 +37,11 @@ public partial class MainWindow : Window
     private readonly IConfiguration _config;
     private CancellationTokenSource? _cts;
     private MemoryStream? _wallpaperStream;
+    private bool _emergencyExit;
+
+    private const string EmergencyPin = "123456";
+    private static readonly string StopFlagPath =
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments), "v3netbill-agent-stop.flag");
 
     public MainWindow(ILogger<MainWindow> logger, PipeClient pipeClient, KeyboardHook keyboardHook, SessionStateProxy stateProxy, IConfiguration config)
     {
@@ -133,6 +139,8 @@ public partial class MainWindow : Window
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         // Overlay harus selalu hidup (idle-lock) — jangan ditutup.
+        // Kecuali saat SHUTDOWN DARURAT (PIN 123456) yang sengaja keluar.
+        if (_emergencyExit) return;
         e.Cancel = true;
     }
 
@@ -355,6 +363,15 @@ public partial class MainWindow : Window
         }
 
         ErrorText.Visibility = Visibility.Collapsed;
+
+        if (!_pipeClient.IsConnected)
+        {
+            ErrorText.Text = "Belum tersambung ke service — tunggu beberapa saat lalu coba lagi";
+            ErrorText.Visibility = Visibility.Visible;
+            _logger.LogWarning("Login dicegah: pipe ke service belum terhubung");
+            return;
+        }
+
         await _pipeClient.SendLoginRequestAsync(kode, password);
     }
 
@@ -362,7 +379,55 @@ public partial class MainWindow : Window
     {
         string pin = PinBox.Password;
         if (string.IsNullOrWhiteSpace(pin)) return;
+
+        // PIN darurat diverifikasi LOKAL dulu (tidak butuh pipe/backend).
+        if (pin == EmergencyPin)
+        {
+            PinHintText.Text = "PIN darurat benar. Klik STOP AGENT untuk berhenti (mode maintenance).";
+            PinHintText.Visibility = Visibility.Visible;
+            StopAgentButton.Visibility = Visibility.Visible;
+            _logger.LogInformation("Emergency PIN diterima — tombol STOP tersedia");
+            return;
+        }
+
+        // PIN bukan darurat → verifikasi normal via backend sampai hasilnya datang.
+        PinHintText.Visibility = Visibility.Collapsed;
+        StopAgentButton.Visibility = Visibility.Collapsed;
         await _pipeClient.SendPinVerifyRequestAsync(pin);
+    }
+
+    private void StopAgentButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            File.WriteAllText(StopFlagPath, DateTime.Now.ToString("O"));
+            _logger.LogWarning("Emergency STOP — flag ditulis: {Path}", StopFlagPath);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Gagal menulis stop flag");
+        }
+
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "sc",
+                Arguments = "stop v3NetbillAgent",
+                CreateNoWindow = true,
+                UseShellExecute = false,
+            };
+            Process.Start(psi);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Gagal memanggil sc stop (bukan masalah besar)");
+        }
+
+        _logger.LogWarning("EMERGENCY STOP — overlay ditutup, masuk mode maintenance");
+        _emergencyExit = true;
+        _keyboardHook.Disable();
+        Application.Current.Shutdown();
     }
 
     private void PinCancelButton_Click(object sender, RoutedEventArgs e)

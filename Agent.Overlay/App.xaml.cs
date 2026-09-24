@@ -1,3 +1,4 @@
+using System.IO;
 using System.Threading;
 using System.Windows;
 using Microsoft.Extensions.Configuration;
@@ -17,6 +18,16 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // Mode maintenance: flag stop ada → jangan jalankan overlay.
+        string stopFlag = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments),
+            "v3netbill-agent-stop.flag");
+        if (File.Exists(stopFlag))
+        {
+            Shutdown();
+            return;
+        }
 
         // Cegah dua instance overlay (watchdog + shortcut logon) berebut pipe.
         bool createdNew;

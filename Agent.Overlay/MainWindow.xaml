@@ -160,6 +160,17 @@
                                  Background="#111" Foreground="White" CaretBrush="#FFD700"
                                  HorizontalAlignment="Center"/>
 
+                    <TextBlock x:Name="PinHintText" 
+                               Text="" FontSize="13" Foreground="#FFD700"
+                               HorizontalAlignment="Center" Margin="0,10,0,0"
+                               Visibility="Collapsed"/>
+
+                    <Button x:Name="StopAgentButton" Content="STOP AGENT (DARURAT)" 
+                            Width="220" Height="40"
+                            Background="#C62828" Foreground="White" FontWeight="Bold" BorderThickness="0"
+                            Margin="0,16,0,0" HorizontalAlignment="Center"
+                            Visibility="Collapsed" Click="StopAgentButton_Click"/>
+
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,16,0,0">
                         <Button x:Name="PinOkButton" Content="OK" Width="80" Height="36" 
                                 Background="#FFD700" Foreground="#111" FontWeight="Bold" BorderThickness="0" Margin="0,0,12,0"

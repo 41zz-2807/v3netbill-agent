@@ -25,6 +25,8 @@ public class PipeClient : IDisposable
 
     public event Action<PipeMessage>? MessageReceived;
 
+    public bool IsConnected => _pipe != null && _pipe.IsConnected;
+
     public PipeClient(ILogger<PipeClient> logger, IConfiguration config)
     {
         _logger = logger;
