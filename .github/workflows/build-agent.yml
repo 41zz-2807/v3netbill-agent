@@ -159,16 +159,28 @@ jobs:
         shell: pwsh
         run: |
           $ws = "${{ github.workspace }}"
-          $extract = "$ws/.verify"
-          New-Item -ItemType Directory -Force -Path $extract | Out-Null
-          $p = Start-Process msiexec.exe -ArgumentList "/a `"$ws/artifacts/${{ env.MSI_OUT }}`" /qn TARGETDIR=`"$extract`"" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { Write-Error "msiexec admin install gagal: exit $($p.ExitCode)"; exit 1 }
-          $exes = Get-ChildItem -Path $extract -Recurse -Filter *.exe -ErrorAction SilentlyContinue
-          if (($exes | Where-Object { $_.Name -eq 'Agent.Service.exe' }).Count -eq 0) { Write-Error "Missing Agent.Service.exe di MSI"; exit 1 }
-          if (($exes | Where-Object { $_.Name -eq 'Agent.Overlay.exe' }).Count -eq 0) { Write-Error "Missing Agent.Overlay.exe di MSI"; exit 1 }
-          $cfgs = Get-ChildItem -Path $extract -Recurse -Filter appsettings.json -ErrorAction SilentlyContinue
-          if ($cfgs.Count -lt 2) { Write-Error "appsettings.json < 2 di MSI"; exit 1 }
-          Write-Host "MSI verification passed: $((Get-ChildItem -Path $extract -Recurse -File).Count) file"
+          $msi = (Resolve-Path "$ws/artifacts/${{ env.MSI_OUT }}").Path
+          Write-Host "MSI: $msi ($((Get-Item $msi).Length) bytes)"
+          $installer = New-Object -ComObject WindowsInstaller.Installer
+          $db = $installer.OpenDatabase($msi, 0)
+          $view = $db.OpenView("SELECT File.FileName, Directory.Directory FROM File, Component, Directory WHERE File.Component_ = Component.Component AND Component.Directory_ = Directory.Directory")
+          $view.Execute()
+          $files = @()
+          while ($rec = $view.Fetch()) {
+            $fileName = "$($rec.StringData(1))"
+            if ($fileName.Contains('|')) { $fileName = $fileName.Split('|')[-1] }
+            $files += "$($rec.StringData(2))\$fileName"
+          }
+          $view.Close()
+          Write-Host ("Files in MSI: " + $files.Count)
+          $servExe = $files | Where-Object { $_ -like '*Agent.Service.exe' }
+          $ovlExe = $files | Where-Object { $_ -like '*Agent.Overlay.exe' }
+          $cfg = $files | Where-Object { $_ -like '*appsettings.json' }
+          if (-not $servExe) { Write-Error "Missing Agent.Service.exe di MSI"; exit 1 }
+          if (-not $ovlExe) { Write-Error "Missing Agent.Overlay.exe di MSI"; exit 1 }
+          if ($cfg.Count -lt 2) { Write-Error "appsettings.json < 2 di MSI"; exit 1 }
+          $files | Sort-Object | ForEach-Object { Write-Host "   $_" }
+          Write-Host "MSI verification passed."
 
       # ----- Upload Artifact -----
       - name: Upload MSI Artifact
