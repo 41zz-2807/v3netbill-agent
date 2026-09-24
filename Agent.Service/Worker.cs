@@ -184,6 +184,8 @@ public class Worker : BackgroundService
             try
             {
                 _pipeServer = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Message, PipeOptions.Asynchronous);
+                // Izinkan semua user (termasuk user sesi interaktif) untuk connect ke pipe service.
+                SecureNamedPipe.GrantEveryoneAccess(pipeName);
                 _logger.LogDebug("Named pipe server waiting for connection...");
                 await _pipeServer.WaitForConnectionAsync(ct);
                 _logger.LogInformation("Overlay connected via named pipe");
@@ -322,14 +324,15 @@ public class Worker : BackgroundService
     {
         try
         {
-            var psi = new ProcessStartInfo
+            string workingDir = Path.GetDirectoryName(_overlayExePath) ?? string.Empty;
+            if (InteractiveProcess.Launch(_overlayExePath, workingDir))
             {
-                FileName = _overlayExePath,
-                UseShellExecute = true,
-                WorkingDirectory = Path.GetDirectoryName(_overlayExePath)
-            };
-            Process.Start(psi);
-            _logger.LogInformation("Agent.Overlay restarted");
+                _logger.LogInformation("Agent.Overlay restarted (interactive session)");
+            }
+            else
+            {
+                _logger.LogInformation("Agent.Overlay tidak diluncurkan (belum ada sesi interaktif aktif)");
+            }
         }
         catch (Exception ex)
         {

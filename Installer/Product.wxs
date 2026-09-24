@@ -52,8 +52,12 @@
 
     <!-- ===== Properties (input pengguna) ===== -->
     <Property Id="SERVER_URL" Value="https://v3netbill.<domain>" />
-    <Property Id="PC_ID" Value="PC001" />
-    <Property Id="AGENT_TOKEN" Secure="yes" />
+    <Property Id="PC_ID" Value="PC001">
+      <RegistrySearch Id="PrefillPcId" Root="HKLM" Key="Software\v3Netbill\Agent" Name="PcId" Type="raw" />
+    </Property>
+    <Property Id="AGENT_TOKEN" Secure="yes">
+      <RegistrySearch Id="PrefillAgentToken" Root="HKLM" Key="Software\v3Netbill\Agent" Name="AgentToken" Type="raw" />
+    </Property>
 
     <!-- ===== Directories ===== -->
     <StandardDirectory Id="ProgramFilesFolder">
