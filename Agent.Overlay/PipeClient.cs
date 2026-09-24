@@ -3,6 +3,7 @@ using System.IO.Pipes;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using V3Netbill.Agent.Core;
@@ -143,7 +144,7 @@ public class PipeClient : IDisposable
 }
 
 // Shared message types (must match Service)
-internal enum PipeMessageType
+public enum PipeMessageType
 {
     StateUpdate = 1,
     SessionStarted = 2,
@@ -156,4 +157,4 @@ internal enum PipeMessageType
     StateRequest = 102
 }
 
-internal record PipeMessage(PipeMessageType Type, string Payload);
+public record PipeMessage(PipeMessageType Type, string Payload);
