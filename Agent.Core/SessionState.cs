@@ -6,9 +6,12 @@ namespace V3Netbill.Agent.Core;
 /// </summary>
 public sealed class SessionState
 {
+    public enum LockState { Unlocked, Locked }
+
     public string? SessionId { get; set; }
     public int DurasiDetik { get; set; }
     public int SisaDetik { get; set; }
+    public LockState State { get; set; } = LockState.Unlocked;
 
     public bool SedangBerjalan => !string.IsNullOrWhiteSpace(SessionId);
 }

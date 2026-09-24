@@ -2,6 +2,7 @@
 
   <PropertyGroup>
     <TargetFramework>net8.0-windows</TargetFramework>
+    <OutputType>WinExe</OutputType>
     <RootNamespace>V3Netbill.Agent.Overlay</RootNamespace>
     <AssemblyName>Agent.Overlay</AssemblyName>
     <UseWPF>true</UseWPF>
