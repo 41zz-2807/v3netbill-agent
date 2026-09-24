@@ -159,21 +159,16 @@ jobs:
         shell: pwsh
         run: |
           $ws = "${{ github.workspace }}"
-          $extract = "$ws/artifacts/msi-extract"
-          msiexec /a "$ws/artifacts/${{ env.MSI_OUT }}" /qn TARGETDIR="$extract" 2>&1 | Out-Null
-          Start-Sleep -Seconds 2
-          $required = @(
-            "Agent.Service/Agent.Service.exe",
-            "Agent.Overlay/Agent.Overlay.exe",
-            "Agent.Service/appsettings.json",
-            "Agent.Overlay/appsettings.json"
-          )
-          foreach ($rel in $required) {
-            $p = Join-Path $extract $rel
-            if (-not (Test-Path $p)) { Write-Error "Missing in MSI: $rel"; exit 1 }
-            Write-Host "OK: $rel"
-          }
-          Write-Host "MSI verification passed."
+          $extract = "$ws/.verify"
+          New-Item -ItemType Directory -Force -Path $extract | Out-Null
+          $p = Start-Process msiexec.exe -ArgumentList "/a `"$ws/artifacts/${{ env.MSI_OUT }}`" /qn TARGETDIR=`"$extract`"" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Write-Error "msiexec admin install gagal: exit $($p.ExitCode)"; exit 1 }
+          $exes = Get-ChildItem -Path $extract -Recurse -Filter *.exe -ErrorAction SilentlyContinue
+          if (($exes | Where-Object { $_.Name -eq 'Agent.Service.exe' }).Count -eq 0) { Write-Error "Missing Agent.Service.exe di MSI"; exit 1 }
+          if (($exes | Where-Object { $_.Name -eq 'Agent.Overlay.exe' }).Count -eq 0) { Write-Error "Missing Agent.Overlay.exe di MSI"; exit 1 }
+          $cfgs = Get-ChildItem -Path $extract -Recurse -Filter appsettings.json -ErrorAction SilentlyContinue
+          if ($cfgs.Count -lt 2) { Write-Error "appsettings.json < 2 di MSI"; exit 1 }
+          Write-Host "MSI verification passed: $((Get-ChildItem -Path $extract -Recurse -File).Count) file"
 
       # ----- Upload Artifact -----
       - name: Upload MSI Artifact
