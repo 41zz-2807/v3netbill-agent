@@ -171,5 +171,28 @@
                 </StackPanel>
             </Border>
         </StackPanel>
+
+        <!-- Mini countdown chip (visible while session active, desktop usable) -->
+        <Border x:Name="MiniPanel" 
+                Background="#E61E1E24" 
+                CornerRadius="12" 
+                Padding="16,10"
+                HorizontalAlignment="Right" 
+                VerticalAlignment="Top" 
+                Margin="16"
+                IsHitTestVisible="False"
+                Visibility="Collapsed">
+            <StackPanel>
+                <TextBlock Text="SISA WAKTU" 
+                           FontSize="12" FontWeight="SemiBold" 
+                           Foreground="#00D4AA"
+                           HorizontalAlignment="Center" Margin="0,0,0,2"/>
+                <TextBlock Text="{Binding CountdownText}" 
+                           FontSize="28" FontWeight="Bold" 
+                           Foreground="White"
+                           FontFamily="Consolas, Courier New, monospace"
+                           HorizontalAlignment="Center"/>
+            </StackPanel>
+        </Border>
     </Grid>
 </Window>

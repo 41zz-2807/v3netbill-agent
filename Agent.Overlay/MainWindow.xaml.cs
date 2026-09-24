@@ -1,7 +1,9 @@
 using System;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Interop;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -15,8 +17,9 @@ namespace V3Netbill.Agent.Overlay;
 /// 
 /// FLOW:
 /// - Receives state updates from Service via named pipe (PipeClient.MessageReceived)
-/// - When Locked: Window becomes fullscreen/topmost, keyboard hook ENABLED, countdown visible
-/// - When Unlocked: Window hidden/minimized, keyboard hook DISABLED, login form visible
+/// - When Locked (idle/no session): Window fullscreen/topmost, keyboard hook ENABLED, login form visible
+/// - When session active: Window = small countdown chip top-right, desktop usable, hook DISABLED
+/// - Session ends → Locked again (fullscreen login)
 /// - Login: sends LoginRequest via PipeClient → Service → ServerConnection
 /// - Technician shortcut: Ctrl+Alt+Shift+F12 → PIN dialog → verify via Service pipe
 /// </summary>
@@ -68,20 +71,13 @@ public partial class MainWindow : Window
 
         // Initial UI state
         UpdateVisibility();
+        UpdateWindowState();
     }
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        // Prevent closing — just hide (standby mode)
-        if (_stateProxy.Locked)
-        {
-            e.Cancel = true;
-        }
-        else
-        {
-            Hide();
-            e.Cancel = true;
-        }
+        // Overlay harus selalu hidup (idle-lock) — jangan ditutup.
+        e.Cancel = true;
     }
 
     private void OnStatePropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -99,9 +95,31 @@ public partial class MainWindow : Window
     private void UpdateVisibility()
     {
         bool locked = _stateProxy.Locked;
-        CountdownCard.Visibility = locked ? Visibility.Visible : Visibility.Collapsed;
-        LoginCard.Visibility = locked ? Visibility.Collapsed : Visibility.Visible;
-        OverlayBackground.Visibility = locked ? Visibility.Visible : Visibility.Collapsed;
+        bool sessionActive = _stateProxy.SisaDetik > 0;
+
+        if (locked)
+        {
+            // Fullscreen login (idle)
+            OverlayBackground.Visibility = Visibility.Visible;
+            ContentPanel.Visibility = Visibility.Visible;
+            CountdownCard.Visibility = Visibility.Collapsed;
+            LoginCard.Visibility = Visibility.Visible;
+            MiniPanel.Visibility = Visibility.Collapsed;
+        }
+        else if (sessionActive)
+        {
+            // Desktop usable + chip countdown
+            OverlayBackground.Visibility = Visibility.Collapsed;
+            ContentPanel.Visibility = Visibility.Collapsed;
+            MiniPanel.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            // Unknown — hide everything
+            OverlayBackground.Visibility = Visibility.Collapsed;
+            ContentPanel.Visibility = Visibility.Collapsed;
+            MiniPanel.Visibility = Visibility.Collapsed;
+        }
     }
 
     private void UpdateWindowState()
@@ -109,25 +127,69 @@ public partial class MainWindow : Window
         if (_stateProxy.Locked)
         {
             // Fullscreen lock mode
+            SetNoActivate(false);
             WindowStyle = WindowStyle.None;
             WindowState = WindowState.Maximized;
             Topmost = true;
             ShowInTaskbar = false;
             ResizeMode = ResizeMode.NoResize;
             _keyboardHook.Enable();
-            _logger.LogInformation("Overlay → LOCKED (fullscreen, hook enabled)");
+            _logger.LogInformation("Overlay → LOCKED (fullscreen login, hook enabled)");
+        }
+        else if (_stateProxy.SisaDetik > 0)
+        {
+            // Chip countdown mode — desktop tetap bisa dipakai
+            SetNoActivate(true);
+            WindowStyle = WindowStyle.None;
+            WindowState = WindowState.Normal;
+            ResizeMode = ResizeMode.NoResize;
+            Width = 300;
+            Height = 96;
+            Left = SystemParameters.WorkArea.Right - Width - 16;
+            Top = 16;
+            Topmost = true;
+            ShowInTaskbar = false;
+            _keyboardHook.Disable();
+            _logger.LogInformation("Overlay → SESSION (chip countdown, hook disabled)");
         }
         else
         {
-            // Standby mode — hidden but process alive
+            // Standby
+            SetNoActivate(false);
             WindowStyle = WindowStyle.None;
             WindowState = WindowState.Minimized;
             Topmost = false;
             ShowInTaskbar = false;
             _keyboardHook.Disable();
-            _logger.LogInformation("Overlay → UNLOCKED (minimized, hook disabled)");
+            _logger.LogInformation("Overlay → STANDBY (minimized, hook disabled)");
         }
     }
+
+    private void SetNoActivate(bool noActivate)
+    {
+        try
+        {
+            IntPtr hwnd = new WindowInteropHelper(this).Handle;
+            if (hwnd == IntPtr.Zero) return;
+            int exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
+            bool has = (exStyle & WS_EX_NOACTIVATE) != 0;
+            if (noActivate && !has) SetWindowLong(hwnd, GWL_EXSTYLE, exStyle | WS_EX_NOACTIVATE);
+            else if (!noActivate && has) SetWindowLong(hwnd, GWL_EXSTYLE, exStyle & ~WS_EX_NOACTIVATE);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "SetNoActivate gagal");
+        }
+    }
+
+    private const int GWL_EXSTYLE = -20;
+    private const int WS_EX_NOACTIVATE = 0x08000000;
+
+    [DllImport("user32.dll")]
+    private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll")]
+    private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
 
     private void OnPipeMessage(PipeMessage msg)
     {
@@ -187,6 +249,8 @@ public partial class MainWindow : Window
             {
                 PinDialog.Visibility = Visibility.Collapsed;
                 _keyboardHook.Disable(); // allow desktop access
+                // Sembunyikan overlay agar desktop terlihat (akses teknisi)
+                WindowState = WindowState.Minimized;
                 _logger.LogInformation("Technician PIN verified — desktop access granted");
             }
             else

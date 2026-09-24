@@ -143,6 +143,7 @@ jobs:
             "$ws/Installer/Product.wxs" `
             "$ws/Installer/SvcDepFiles.wxs" `
             "$ws/Installer/OverlayDepFiles.wxs" `
+            -arch x64 `
             -d SvcPublishDir="$ws/artifacts/Agent.Service.Special\" `
             -d SvcDepDir="$ws/artifacts/Agent.Service\" `
             -d OverlayPublishDir="$ws/artifacts/Agent.Overlay.Special\" `

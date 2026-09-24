@@ -46,7 +46,7 @@ public class Worker : BackgroundService
     private NamedPipeServerStream? _pipeServer;
     private Task? _pipeListenerTask;
     private Timer? _watchdogTimer;
-    private SessionState _currentState = new();
+    private SessionState _currentState = new() { State = SessionState.LockState.Locked };
     private string _overlayExePath = string.Empty;
     private readonly object _stateLock = new();
 
@@ -60,8 +60,8 @@ public class Worker : BackgroundService
     {
         _logger.LogInformation("v3Netbill Agent Service starting...");
 
-        // Pastikan tidak ada sisa blokir Task Manager (mis. crash/reboot saat locked)
-        SetTaskManagerBlocked(false);
+        // Mode: PC terkunci saat idle (tanpa sesi). Mulai dengan blokir Task Manager.
+        SetTaskManagerBlocked(true);
 
         var serverUrl = GetConfig("Server:Url", "ServerUrl", "http://localhost:3000");
         var pcId = GetConfig("Agent:PcId", "PcId", "PC001");
@@ -124,9 +124,9 @@ public class Worker : BackgroundService
             _currentState.SessionId = e.Payload.SessionId;
             _currentState.DurasiDetik = e.Payload.DurasiDetik;
             _currentState.SisaDetik = e.Payload.DurasiDetik;
-            _currentState.State = SessionState.LockState.Locked;
+            _currentState.State = SessionState.LockState.Unlocked;
         }
-        SetTaskManagerBlocked(true);
+        SetTaskManagerBlocked(false);
         _ = SendStateUpdateAsync();
     }
 
@@ -143,12 +143,12 @@ public class Worker : BackgroundService
     {
         lock (_stateLock)
         {
-            _currentState.State = SessionState.LockState.Unlocked;
+            _currentState.State = SessionState.LockState.Locked;
             _currentState.SessionId = null;
             _currentState.DurasiDetik = 0;
             _currentState.SisaDetik = 0;
         }
-        SetTaskManagerBlocked(false);
+        SetTaskManagerBlocked(true);
         _ = SendStateUpdateAsync();
         _ = SendToOverlayAsync(new PipeMessage(PipeMessageType.SessionStopped, JsonConvert.SerializeObject(new { alasan = e.Payload.Alasan })));
     }
@@ -354,13 +354,10 @@ public class Worker : BackgroundService
     }
 
     /// <summary>
-    /// Baca konfigurasi: appsettings.json > Registry HKLM (ditulis installer).
+    /// Baca konfigurasi: Registry HKLM (ditulis installer) > appsettings.json > default.
     /// </summary>
     private string GetConfig(string configKey, string registryValueName, string defaultValue)
     {
-        var fromFile = _configuration[configKey];
-        if (!string.IsNullOrWhiteSpace(fromFile)) return fromFile;
-
         try
         {
             using var key = Registry.LocalMachine.OpenSubKey(@"Software\v3Netbill\Agent");
@@ -371,6 +368,9 @@ public class Worker : BackgroundService
         {
             _logger.LogWarning(ex, "Gagal membaca registry {Value}", registryValueName);
         }
+
+        var fromFile = _configuration[configKey];
+        if (!string.IsNullOrWhiteSpace(fromFile)) return fromFile;
 
         return defaultValue;
     }

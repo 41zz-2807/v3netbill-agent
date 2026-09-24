@@ -12,7 +12,7 @@ namespace V3Netbill.Agent.Overlay;
 public class SessionStateProxy : INotifyPropertyChanged
 {
     private readonly ILogger<SessionStateProxy> _logger;
-    private bool _locked;
+    private bool _locked = true;
     private string? _sessionId;
     private int _durasiDetik;
     private int _sisaDetik;
@@ -127,7 +127,7 @@ public class SessionStateProxy : INotifyPropertyChanged
 
     public void ApplySessionStopped(string json)
     {
-        Locked = false;
+        Locked = true;
         SessionId = null;
         DurasiDetik = 0;
         SisaDetik = 0;
