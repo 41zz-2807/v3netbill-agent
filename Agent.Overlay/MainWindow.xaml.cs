@@ -1,9 +1,13 @@
 using System;
+using System.IO;
+using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -31,6 +35,7 @@ public partial class MainWindow : Window
     private readonly SessionStateProxy _stateProxy;
     private readonly IConfiguration _config;
     private CancellationTokenSource? _cts;
+    private MemoryStream? _wallpaperStream;
 
     public MainWindow(ILogger<MainWindow> logger, PipeClient pipeClient, KeyboardHook keyboardHook, SessionStateProxy stateProxy, IConfiguration config)
     {
@@ -72,6 +77,57 @@ public partial class MainWindow : Window
         // Initial UI state
         UpdateVisibility();
         UpdateWindowState();
+
+        // Ambil wallpaper dari backend (jika ada) untuk background layar kunci.
+        _ = LoadWallpaperAsync();
+    }
+
+    private string GetServerUrl()
+    {
+        var url = "https://v3netbill.<domain>";
+        try
+        {
+            using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\v3Netbill\Agent");
+            var reg = key?.GetValue("ServerUrl") as string;
+            if (!string.IsNullOrWhiteSpace(reg)) url = reg;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Registry tak terbaca, pakai default");
+        }
+        return url;
+    }
+
+    private async Task LoadWallpaperAsync()
+    {
+        try
+        {
+            string serverUrl = GetServerUrl();
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+            using var resp = await http.GetAsync($"{serverUrl.TrimEnd('/')}/api/settings/wallpaper");
+            if (!resp.IsSuccessStatusCode) return;
+
+            var bytes = await resp.Content.ReadAsByteArrayAsync();
+            if (bytes.Length == 0) return;
+
+            var bitmap = new BitmapImage();
+            _wallpaperStream = new MemoryStream(bytes);
+            bitmap.BeginInit();
+            bitmap.CacheOption = BitmapCacheOption.OnLoad;
+            bitmap.StreamSource = _wallpaperStream;
+            bitmap.EndInit();
+            bitmap.Freeze();
+
+            Dispatcher.Invoke(() =>
+            {
+                OverlayBackground.Background = new ImageBrush(bitmap) { Stretch = Stretch.UniformToFill };
+            });
+            _logger.LogInformation("Wallpaper diterapkan ({N} bytes)", bytes.Length);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Gagal memuat wallpaper");
+        }
     }
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
