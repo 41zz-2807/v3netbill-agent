@@ -28,7 +28,8 @@ internal enum PipeMessageType
 
     // Overlay → Service
     LoginRequest = 100,     // Login request (kode, password)
-    PinVerifyRequest = 101  // PIN verify request (pin)
+    PinVerifyRequest = 101, // PIN verify request (pin)
+    StateRequest = 102      // Overlay minta state terkini (setelah reconnect)
 }
 
 internal record PipeMessage(PipeMessageType Type, string Payload);
@@ -59,9 +60,12 @@ public class Worker : BackgroundService
     {
         _logger.LogInformation("v3Netbill Agent Service starting...");
 
-        var serverUrl = _configuration["Server:Url"] ?? "http://localhost:3000";
-        var pcId = _configuration["Agent:PcId"] ?? "PC001";
-        var agentToken = _configuration["Agent:Token"] ?? "CHANGE_ME";
+        // Pastikan tidak ada sisa blokir Task Manager (mis. crash/reboot saat locked)
+        SetTaskManagerBlocked(false);
+
+        var serverUrl = GetConfig("Server:Url", "ServerUrl", "http://localhost:3000");
+        var pcId = GetConfig("Agent:PcId", "PcId", "PC001");
+        var agentToken = GetConfig("Agent:Token", "AgentToken", "CHANGE_ME");
         _overlayExePath = _configuration["Overlay:ExePath"] ?? Path.Combine(AppContext.BaseDirectory, "..", "Agent.Overlay", "Agent.Overlay.exe");
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
@@ -245,6 +249,11 @@ public class Worker : BackgroundService
                     }
                     break;
                 }
+            case PipeMessageType.StateRequest:
+                {
+                    await SendStateUpdateAsync();
+                    break;
+                }
         }
     }
 
@@ -253,9 +262,9 @@ public class Worker : BackgroundService
         try
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-            var serverUrl = _configuration["Server:Url"] ?? "http://localhost:3000";
-            var pcId = _configuration["Agent:PcId"] ?? "PC001";
-            var agentToken = _configuration["Agent:Token"] ?? "";
+            var serverUrl = GetConfig("Server:Url", "ServerUrl", "http://localhost:3000");
+            var pcId = GetConfig("Agent:PcId", "PcId", "PC001");
+            var agentToken = GetConfig("Agent:Token", "AgentToken", "");
 
             var payload = new { pcId, pin };
             var content = new StringContent(JsonConvert.SerializeObject(payload), Encoding.UTF8, "application/json");
@@ -342,6 +351,28 @@ public class Worker : BackgroundService
         {
             _logger.LogError(ex, "Failed to {Action} Task Manager", block ? "block" : "unblock");
         }
+    }
+
+    /// <summary>
+    /// Baca konfigurasi: appsettings.json > Registry HKLM (ditulis installer).
+    /// </summary>
+    private string GetConfig(string configKey, string registryValueName, string defaultValue)
+    {
+        var fromFile = _configuration[configKey];
+        if (!string.IsNullOrWhiteSpace(fromFile)) return fromFile;
+
+        try
+        {
+            using var key = Registry.LocalMachine.OpenSubKey(@"Software\v3Netbill\Agent");
+            var fromRegistry = key?.GetValue(registryValueName) as string;
+            if (!string.IsNullOrWhiteSpace(fromRegistry)) return fromRegistry;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Gagal membaca registry {Value}", registryValueName);
+        }
+
+        return defaultValue;
     }
 
     public override async Task StopAsync(CancellationToken cancellationToken)

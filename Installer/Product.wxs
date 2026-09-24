@@ -1,65 +1,82 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
-     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"
-     xmlns:netfx="http://wixtoolset.org/schemas/v4/wxs/netfx">
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <!-- ============================================================
        v3NetbillAgent Installer (WiX v4)
-       - Installs Agent.Service as Windows Service (SYSTEM, auto-start)
-       - Installs Agent.Overlay.exe to same folder, creates Scheduled Task at logon (all users)
-       - Custom UI dialog: input Server URL → written to appsettings.json
-       - Uninstall protection: see NOTE below
+       Layout:
+         [ProgramFilesFolder]\v3NetbillAgent\
+           Agent.Service\   <- Agent.Service.exe + deps  (Windows Service, SYSTEM)
+           Agent.Overlay\   <- Agent.Overlay.exe + deps  (shortcut di Startup all-users)
+       Konfigurasi (ServerUrl/PcId/AgentToken) ditulis KE REGISTRY HKLM
+       oleh MSI native (transactional, tanpa custom action). Agent membaca
+       override registry dengan prioritas di atas appsettings.json.
+
+       Overlay dijalankan saat logon lewat shortcut di StartupFolder
+       (MSI native); jika mati, dihidupkan ulang oleh watchdog di Agent.Service.
+
+       Dep fragment di-generate oleh skrip di build-agent.yml:
+          SvcDepFiles.wxs (cg SvcDepComponents, dr SVCFOLDER)
+          OverlayDepFiles.wxs (cg OverlayDepComponents, dr OVERLAYFOLDER)
        ============================================================ -->
-  
-  <Product Id="*" 
-           UpgradeCode="7f3a9b1e-5c2d-4a8f-9e1b-3d6c8f4a2b7e"
-           Name="v3Netbill Agent" 
-           Version="1.0.0.0" 
-           Manufacturer="v3Netbill" 
+
+  <Package UpgradeCode="7f3a9b1e-5c2d-4a8f-9e1b-3d6c8f4a2b7e"
+           Name="v3Netbill Agent"
+           Version="1.0.0.0"
+           Manufacturer="v3Netbill"
            Language="1033"
-           Codepage="65001">
-    
-    <Package InstallerVersion="500" 
-             Compressed="yes" 
-             InstallScope="perMachine"
-             Description="v3Netbill Warnet Billing Client Agent" 
-             Comments="Installs Agent Service + Overlay" />
-    
-    <MajorUpgrade DowngradeErrorMessage="A newer version is already installed." 
+           Codepage="65001"
+           InstallerVersion="500"
+           Compressed="yes"
+           Scope="perMachine">
+
+    <MajorUpgrade DowngradeErrorMessage="Versi yang lebih baru sudah terpasang."
                   Schedule="afterInstallInitialize" />
-    
+
     <MediaTemplate EmbedCab="yes" />
-    
+
+    <!-- UI wizard: WixUI_InstallDir + dialog konfigurasi server di awal.
+         Pattern mengikuti unit test resmi WiX v4 (InstallDir_SpecialDlg).
+         License RTF default berasal dari $(var.licenseRtf) (di-set via -d saat build). -->
+    <ui:WixUI Id="InstallDir_ServerConfig" InstallDirectory="INSTALLFOLDER" />
+
     <!-- ===== Feature ===== -->
     <Feature Id="MainFeature" Title="v3Netbill Agent" Level="1">
-      <ComponentGroupRef Id="ServiceComponents" />
-      <ComponentGroupRef Id="OverlayComponents" />
+      <ComponentGroupRef Id="SvcExeComponents" />
+      <ComponentGroupRef Id="SvcDepComponents" />        <!-- dari generator -->
+      <ComponentGroupRef Id="OverlayExeComponents" />
+      <ComponentGroupRef Id="OverlayDepComponents" />    <!-- dari generator -->
       <ComponentGroupRef Id="ConfigComponents" />
+      <ComponentGroupRef Id="OverlayStartupComponents" />
       <ComponentGroupRef Id="ShortcutComponents" />
     </Feature>
-    
-    <!-- ===== Properties (UI input) ===== -->
-    <Property Id="SERVER_URL" Value="http://localhost:3000" />
+
+    <!-- ===== Properties (input pengguna) ===== -->
+    <Property Id="SERVER_URL" Value="https://v3netbill.<domain>" />
     <Property Id="PC_ID" Value="PC001" />
-    <Property Id="AGENT_TOKEN" Value="" />
-    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
-    
+    <Property Id="AGENT_TOKEN" Secure="yes" />
+
     <!-- ===== Directories ===== -->
-    <Directory Id="TARGETDIR" Name="SourceDir">
-      <Directory Id="ProgramFilesFolder">
-        <Directory Id="INSTALLFOLDER" Name="v3NetbillAgent" />
+    <StandardDirectory Id="ProgramFilesFolder">
+      <Directory Id="INSTALLFOLDER" Name="v3NetbillAgent">
+        <Directory Id="SVCFOLDER" Name="Agent.Service" />
+        <Directory Id="OVERLAYFOLDER" Name="Agent.Overlay" />
       </Directory>
-      <Directory Id="ProgramMenuFolder">
-        <Directory Id="ApplicationProgramsFolder" Name="v3Netbill Agent" />
-      </Directory>
-    </Directory>
-    
-    <!-- ===== Service Components ===== -->
-    <ComponentGroup Id="ServiceComponents">
-      <!-- Agent.Service.exe -->
-      <Component Id="AgentServiceExe" Directory="INSTALLFOLDER" Guid="{a1b2c3d4-e5f6-7890-abcd-ef1234567890}">
-        <File Id="AgentServiceExeFile" Source="$(var.AgentServicePublishDir)Agent.Service.exe" KeyPath="yes" />
-        
-        <!-- Install as Windows Service -->
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="v3Netbill Agent" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="StartupFolder" />
+
+    <!-- ===== Service (komponen manual: exe + service install/control) ===== -->
+    <ComponentGroup Id="SvcExeComponents">
+      <Component Id="AgentServiceExe" Directory="SVCFOLDER"
+                 Guid="{a1b2c3d4-e5f6-7890-abcd-ef1234567890}">
+        <File Id="AgentServiceExeFile"
+              Source="$(var.SvcPublishDir)Agent.Service.exe"
+              KeyPath="yes" />
+
         <ServiceInstall Id="AgentServiceInstall"
                         Name="v3NetbillAgent"
                         DisplayName="v3Netbill Agent Service"
@@ -69,175 +86,190 @@
                         ErrorControl="normal"
                         Type="ownProcess"
                         Vital="yes" />
-        
+
         <ServiceControl Id="AgentServiceControl"
                         Name="v3NetbillAgent"
                         Start="install"
                         Stop="both"
                         Remove="uninstall"
                         Wait="yes" />
-        
-        <!-- Config files for Service -->
-        <File Id="ServiceAppSettings" Source="$(var.AgentServicePublishDir)appsettings.json" />
-        <File Id="ServiceRuntimeConfig" Source="$(var.AgentServicePublishDir)Agent.Service.runtimeconfig.json" />
-        <!-- Copy all deps from publish folder -->
-        <CreateFolder Directory="INSTALLFOLDER" />
+
+        <File Id="ServiceDepsJson" Source="$(var.SvcPublishDir)Agent.Service.deps.json" />
+        <File Id="ServiceRuntimeConfig" Source="$(var.SvcPublishDir)Agent.Service.runtimeconfig.json" />
+        <File Id="ServiceAppSettings" Source="$(var.SvcPublishDir)appsettings.json" />
+        <CreateFolder />
       </Component>
-      
-      <!-- Service DLLs / deps (wildcard via Heat or manual - here simplified) -->
-      <!-- In practice, use `dotnet wix heat dir $(var.AgentServicePublishDir) -cg ServiceComponents -gg -sfrag -srd -dr INSTALLFOLDER -var var.AgentServicePublishDir` -->
-      <!-- For this scaffold, we assume all publish output files are included via a component group generated by heat. -->
-      <!-- See build-agent.yml for heat command. -->
     </ComponentGroup>
-    
-    <!-- ===== Overlay Components ===== -->
-    <ComponentGroup Id="OverlayComponents">
-      <Component Id="AgentOverlayExe" Directory="INSTALLFOLDER" Guid="{b2c3d4e5-f6a7-8901-bcde-f12345678901}">
-        <File Id="AgentOverlayExeFile" Source="$(var.AgentOverlayPublishDir)Agent.Overlay.exe" KeyPath="yes" />
+
+    <!-- ===== Overlay (komponen manual: exe) ===== -->
+    <ComponentGroup Id="OverlayExeComponents">
+      <Component Id="AgentOverlayExe" Directory="OVERLAYFOLDER"
+                 Guid="{b2c3d4e5-f6a7-8901-bcde-f12345678901}">
+        <File Id="AgentOverlayExeFile"
+              Source="$(var.OverlayPublishDir)Agent.Overlay.exe"
+              KeyPath="yes" />
+        <File Id="OverlayDepsJson" Source="$(var.OverlayPublishDir)Agent.Overlay.deps.json" />
+        <File Id="OverlayRuntimeConfig" Source="$(var.OverlayPublishDir)Agent.Overlay.runtimeconfig.json" />
+        <File Id="OverlayAppSettings" Source="$(var.OverlayPublishDir)appsettings.json" />
+        <CreateFolder />
       </Component>
-      
-      <!-- Scheduled Task: Run Agent.Overlay at user logon (all users) -->
-      <!-- Using util:Task for WiX v4 (requires -ext WixToolset.Util.wixext) -->
-      <Component Id="OverlayScheduledTask" Directory="INSTALLFOLDER" Guid="{c3d4e5f6-a7b8-9012-cdef-123456789012}">
-        <Condition><![CDATA[NOT REMOVE]]></Condition>
-        <util:Task Id="OverlayLogonTask"
-                   Name="v3NetbillAgentOverlay"
-                   Description="Starts v3Netbill Agent Overlay at user logon"
-                   User="[LogonUser]"
-                   LogonType="interactive"
-                   RunOnlyIfNetworkAvailable="false"
-                   Hidden="no">
-          <util:Trigger Type="logon" />
-          <util:Action Executable="[INSTALLFOLDER]Agent.Overlay.exe" />
-        </util:Task>
-      </Component>
-      
-      <!-- Overlay config & deps -->
-      <File Id="OverlayAppSettings" Source="$(var.AgentOverlayPublishDir)appsettings.json" />
-      <File Id="OverlayRuntimeConfig" Source="$(var.AgentOverlayPublishDir)Agent.Overlay.runtimeconfig.json" />
     </ComponentGroup>
-    
-    <!-- ===== Config Components (shared appsettings.json with Server URL from UI) ===== -->
+
+    <!-- ===== Config registry (ditulis native oleh MSI) ===== -->
     <ComponentGroup Id="ConfigComponents">
-      <Component Id="AppSettingsConfig" Directory="INSTALLFOLDER" Guid="{d4e5f6a7-b8c9-0123-def0-123456789013}">
-        <!-- This file will be created/updated by custom action during install with SERVER_URL property -->
-        <File Id="AppSettingsFile" Source="$(var.AgentServicePublishDir)appsettings.json" KeyPath="yes" />
-        
-        <!-- Custom Action: Write SERVER_URL, PC_ID, AGENT_TOKEN to appsettings.json after install -->
-        <util:XmlConfig Id="SetServerUrl"
-                        Action="create"
-                        ElementPath="//configuration/Server/Url"
-                        File="[INSTALLFOLDER]appsettings.json"
-                        Value="[SERVER_URL]"
-                        Sequence="1" />
-        <util:XmlConfig Id="SetPcId"
-                        Action="create"
-                        ElementPath="//configuration/Agent/PcId"
-                        File="[INSTALLFOLDER]appsettings.json"
-                        Value="[PC_ID]"
-                        Sequence="2" />
-        <util:XmlConfig Id="SetAgentToken"
-                        Action="create"
-                        ElementPath="//configuration/Agent/Token"
-                        File="[INSTALLFOLDER]appsettings.json"
-                        Value="[AGENT_TOKEN]"
-                        Sequence="3" />
+      <Component Id="AgentConfigRegistry" Directory="INSTALLFOLDER"
+                 Guid="{d4e5f6a7-b8c9-0123-def0-123456789013}">
+        <RegistryKey Root="HKLM" Key="Software\v3Netbill\Agent">
+          <RegistryValue Name="ServerUrl" Type="string" Value="[SERVER_URL]" KeyPath="yes" />
+          <RegistryValue Name="PcId" Type="string" Value="[PC_ID]" />
+          <RegistryValue Name="AgentToken" Type="string" Value="[AGENT_TOKEN]" />
+        </RegistryKey>
+        <CreateFolder />
       </Component>
     </ComponentGroup>
-    
+
+    <!-- ===== Overlay di Startup (user yang memasang) ===== -->
+    <ComponentGroup Id="OverlayStartupComponents">
+      <Component Id="OverlayStartupShortcut" Directory="StartupFolder"
+                 Guid="{c3d4e5f6-a7b8-9012-cdef-123456789012}">
+        <Shortcut Id="OverlayStartupShortcutLink"
+                  Name="v3Netbill Agent Overlay"
+                  Target="[OVERLAYFOLDER]Agent.Overlay.exe"
+                  Description="v3Netbill Agent Overlay" />
+        <RemoveFolder Id="RemoveOverlayStartupFolder" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\v3Netbill\Agent"
+                       Name="OverlayStartup" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
     <!-- ===== Shortcuts ===== -->
     <ComponentGroup Id="ShortcutComponents">
-      <Component Id="UninstallShortcut" Directory="ApplicationProgramsFolder" Guid="{e5f6a7b8-c9d0-1234-ef01-234567890123}">
+      <Component Id="UninstallShortcut" Directory="ApplicationProgramsFolder"
+                 Guid="{e5f6a7b8-c9d0-1234-ef01-234567890123}">
         <Shortcut Id="UninstallShortcut"
                   Name="Uninstall v3Netbill Agent"
                   Target="[SystemFolder]msiexec.exe"
                   Arguments="/x [ProductCode]"
                   Description="Uninstall v3Netbill Agent" />
         <RemoveFolder Id="RemoveAppProgramsFolder" On="uninstall" />
-        <RegistryValue Root="HKCU" Key="Software\v3Netbill\Agent" Name="Installed" Type="integer" Value="1" KeyPath="yes" />
+        <RegistryValue Root="HKCU" Key="Software\v3Netbill\Agent"
+                       Name="Installed" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </ComponentGroup>
-    
-    <!-- ===== UI: Custom Dialog for Server URL ===== -->
-    <UI Id="CustomUI">
-      <TextStyle Id="DefaultFont" FaceName="Segoe UI" Size="9" />
-      <Property Id="DefaultUIFont" Value="DefaultFont" />
-      
-      <Dialog Id="ServerConfigDialog" Width="370" Height="270" Title="v3Netbill Agent - Server Configuration">
-        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" Text="WixUI_Bmp_Banner" />
-        <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="30" Transparent="yes" NoPrefix="yes">
-          <Text>{\DefaultFont}Server Configuration</Text>
-        </Control>
-        <Control Id="Description" Type="Text" X="15" Y="40" Width="340" Height="30" Transparent="yes" NoPrefix="yes">
-          <Text>Enter the v3Netbill backend server address.</Text>
-        </Control>
-        
-        <Control Id="ServerUrlLabel" Type="Text" X="15" Y="80" Width="100" Height="17" Transparent="yes" NoPrefix="yes">
-          <Text>Server URL:</Text>
-        </Control>
-        <Control Id="ServerUrlEdit" Type="Edit" X="15" Y="100" Width="340" Height="21" Property="SERVER_URL" />
-        
-        <Control Id="PcIdLabel" Type="Text" X="15" Y="130" Width="100" Height="17" Transparent="yes" NoPrefix="yes">
-          <Text>PC ID:</Text>
-        </Control>
-        <Control Id="PcIdEdit" Type="Edit" X="15" Y="150" Width="340" Height="21" Property="PC_ID" />
-        
-        <Control Id="TokenLabel" Type="Text" X="15" Y="180" Width="100" Height="17" Transparent="yes" NoPrefix="yes">
-          <Text>Agent Token:</Text>
-        </Control>
-        <Control Id="TokenEdit" Type="Edit" X="15" Y="200" Width="340" Height="21" Property="AGENT_TOKEN" Password="yes" />
-        
-        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="Next &gt;" />
-        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="&lt; Back" />
-        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="Cancel" />
-      </Dialog>
-      
-      <InstallUISequence>
-        <Show Dialog="ServerConfigDialog" Before="ExecuteAction">NOT Installed</Show>
-      </InstallUISequence>
-    </UI>
-    <UIRef Id="WixUI_ErrorProgressText" />
-    <UIRef Id="WixUI_Common" />
-    
-    <!-- ===== Custom Actions for Uninstall Protection (see NOTE) ===== -->
-    <!-- 
-    NOTE ON UNINSTALL PROTECTION:
-    ================================================================================
-    The requirement: "Uninstall harus prompt PIN dulu, panggil verify-pin endpoint"
-    
-    APPROACH TAKEN: Application-level protection (NOT installer-level)
-    ================================================================================
-    Reasoning:
-    1. Windows MSI uninstall CANNOT be reliably blocked by custom actions that make
-       network calls. MSI runs with elevated privileges, network may not be available,
-       custom actions can hang/timeout, and users can always force-uninstall via
-       `msiexec /x {ProductCode}` or third-party tools.
-    2. WiX custom actions calling HTTP endpoints require DTF (C++/C# CA), async handling,
-       proper rollback, and are fragile in elevated/non-interactive contexts.
-    3. The REAL protection needed is: prevent unauthorized uninstall from disabling
-       the lockscreen/TaskMgr block while a session is active.
-    
-    SOLUTION IMPLEMENTED:
-    - Agent.Service (Windows Service, runs as SYSTEM) implements the actual protection:
-      * Registry DisableTaskMgr = 1 when Locked
-      * Watchdog restarts Overlay if killed
-      * Keyboard hook blocks Alt+Tab/Win/Alt+F4
-    - These protections are ONLY removed when:
-      a) Session ends normally (server sends session:stop), OR
-      b) Technician verifies PIN via Overlay UI (Ctrl+Alt+Shift+F12 → PIN dialog → calls /api/settings/verify-pin)
-    - If someone uninstalls via Control Panel:
-      * MSI removes files, service, scheduled task
-      * BUT Agent.Service stops gracefully → OnStop() calls SetTaskManagerBlocked(false)
-      * This is ACCEPTABLE because uninstall implies admin intent to remove the agent entirely
-      * If uninstall is malicious (user trying to bypass lock), they need admin rights anyway
-        (MSI perMachine requires elevation), and at that point they own the machine.
-    
-    ALTERNATIVE NOT TAKEN: WiX Custom Action calling verify-pin during uninstall
-    - Would require: DTF custom action (C#), async HTTP, UI during uninstall (not supported
-      in basic UI sequence), handling network failures, rollback on cancel.
-    - Adds significant complexity for marginal security gain (admin can always kill process/
-      delete registry keys manually).
-    -->
-    
-  </Product>
+  </Package>
+
+    <!-- ===== UI: dialog config + override sequence WixUI_InstallDir ===== -->
+    <!-- Fragment 1: definisi dialog konfigurasi server -->
+    <Fragment>
+      <UI>
+        <Dialog Id="ServerConfigDialog" Width="370" Height="270" Title="v3Netbill Agent - Konfigurasi Server">
+          <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="WixUI_Bmp_Banner" />
+          <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+          <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+          <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes">
+            <Text Value="Konfigurasi Server" />
+          </Control>
+          <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="30" Transparent="yes" NoPrefix="yes">
+            <Text Value="Isi alamat server billing, ID PC, dan Token agent yang dibuat di dashboard." />
+          </Control>
+
+          <Control Id="ServerUrlLabel" Type="Text" X="15" Y="80" Width="100" Height="17" Transparent="yes" NoPrefix="yes">
+            <Text Value="Server URL:" />
+          </Control>
+          <Control Id="ServerUrlEdit" Type="Edit" X="15" Y="100" Width="340" Height="21" Property="SERVER_URL" />
+
+          <Control Id="PcIdLabel" Type="Text" X="15" Y="130" Width="100" Height="17" Transparent="yes" NoPrefix="yes">
+            <Text Value="PC ID:" />
+          </Control>
+          <Control Id="PcIdEdit" Type="Edit" X="15" Y="150" Width="340" Height="21" Property="PC_ID" />
+
+          <Control Id="TokenLabel" Type="Text" X="15" Y="180" Width="100" Height="17" Transparent="yes" NoPrefix="yes">
+            <Text Value="Agent Token:" />
+          </Control>
+          <Control Id="TokenEdit" Type="Edit" X="15" Y="200" Width="340" Height="21" Property="AGENT_TOKEN" Password="yes" />
+
+          <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
+          <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)" />
+          <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+            <Publish Event="SpawnDialog" Value="CancelDlg" />
+          </Control>
+        </Dialog>
+      </UI>
+    </Fragment>
+
+    <!-- Fragment 2: referensi per-arch UI (mengikuti WixUI_InstallDir) -->
+    <?foreach WIXUIARCH in X86;X64;A64 ?>
+    <Fragment>
+      <UI Id="InstallDir_ServerConfig_$(WIXUIARCH)">
+        <Publish Dialog="LicenseAgreementDlg" Control="Print" Event="DoAction" Value="WixUIPrintEula_$(WIXUIARCH)" />
+        <Publish Dialog="BrowseDlg" Control="OK" Event="DoAction" Value="WixUIValidatePath_$(WIXUIARCH)" Order="3" Condition="NOT WIXUI_DONTVALIDATEPATH" />
+        <Publish Dialog="InstallDirDlg" Control="Next" Event="DoAction" Value="WixUIValidatePath_$(WIXUIARCH)" Order="2" Condition="NOT WIXUI_DONTVALIDATEPATH" />
+      </UI>
+
+      <UIRef Id="InstallDir_ServerConfig" />
+    </Fragment>
+    <?endforeach?>
+
+    <!-- Fragment 3: UI override — salinan WixUI_InstallDir dengan ServerConfigDialog
+         disisipkan: WelcomeDlg -> ServerConfigDialog -> LicenseAgreementDlg -> InstallDirDlg -->
+    <Fragment>
+      <UI Id="file InstallDir_ServerConfig">
+        <TextStyle Id="WixUI_Font_Normal" FaceName="Tahoma" Size="8" />
+        <TextStyle Id="WixUI_Font_Bigger" FaceName="Tahoma" Size="12" />
+        <TextStyle Id="WixUI_Font_Title" FaceName="Tahoma" Size="9" Bold="yes" />
+
+        <Property Id="DefaultUIFont" Value="WixUI_Font_Normal" />
+
+        <DialogRef Id="BrowseDlg" />
+        <DialogRef Id="DiskCostDlg" />
+        <DialogRef Id="ErrorDlg" />
+        <DialogRef Id="FatalError" />
+        <DialogRef Id="FilesInUse" />
+        <DialogRef Id="MsiRMFilesInUse" />
+        <DialogRef Id="PrepareDlg" />
+        <DialogRef Id="ProgressDlg" />
+        <DialogRef Id="ResumeDlg" />
+        <DialogRef Id="UserExit" />
+
+        <Publish Dialog="BrowseDlg" Control="OK" Event="SpawnDialog" Value="InvalidDirDlg" Order="4" Condition="NOT WIXUI_DONTVALIDATEPATH AND WIXUI_INSTALLDIR_VALID&lt;&gt;&quot;1&quot;" />
+
+        <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return" Order="999" />
+
+        <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="ServerConfigDialog" />
+        <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Condition="Installed AND PATCH" />
+
+        <Publish Dialog="ServerConfigDialog" Control="Back" Event="NewDialog" Value="WelcomeDlg" />
+        <Publish Dialog="ServerConfigDialog" Control="Next" Event="NewDialog" Value="LicenseAgreementDlg" />
+
+        <Publish Dialog="LicenseAgreementDlg" Control="Back" Event="NewDialog" Value="ServerConfigDialog" />
+        <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg" Condition="LicenseAccepted = &quot;1&quot;" />
+
+        <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="LicenseAgreementDlg" />
+        <Publish Dialog="InstallDirDlg" Control="Next" Event="SetTargetPath" Value="[WIXUI_INSTALLDIR]" Order="1" />
+        <Publish Dialog="InstallDirDlg" Control="Next" Event="SpawnDialog" Value="InvalidDirDlg" Order="3" Condition="NOT WIXUI_DONTVALIDATEPATH AND WIXUI_INSTALLDIR_VALID&lt;&gt;&quot;1&quot;" />
+        <Publish Dialog="InstallDirDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Order="4" Condition="WIXUI_DONTVALIDATEPATH OR WIXUI_INSTALLDIR_VALID=&quot;1&quot;" />
+        <Publish Dialog="InstallDirDlg" Control="ChangeFolder" Property="_BrowseProperty" Value="[WIXUI_INSTALLDIR]" Order="1" />
+        <Publish Dialog="InstallDirDlg" Control="ChangeFolder" Event="SpawnDialog" Value="BrowseDlg" Order="2" />
+        <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="InstallDirDlg" Order="1" Condition="NOT Installed" />
+        <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="MaintenanceTypeDlg" Order="2" Condition="Installed AND NOT PATCH" />
+        <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="2" Condition="Installed AND PATCH" />
+
+        <Publish Dialog="MaintenanceWelcomeDlg" Control="Next" Event="NewDialog" Value="MaintenanceTypeDlg" />
+
+        <Publish Dialog="MaintenanceTypeDlg" Control="RepairButton" Event="NewDialog" Value="VerifyReadyDlg" />
+        <Publish Dialog="MaintenanceTypeDlg" Control="RemoveButton" Event="NewDialog" Value="VerifyReadyDlg" />
+        <Publish Dialog="MaintenanceTypeDlg" Control="Back" Event="NewDialog" Value="MaintenanceWelcomeDlg" />
+
+        <Property Id="ARPNOMODIFY" Value="1" />
+      </UI>
+
+      <UIRef Id="WixUI_Common" />
+    </Fragment>
+
+    <!-- ===== Catatan uninstall protection =====
+         Proteksi utama dilakukan oleh Agent.Service (registry DisableTaskMgr,
+         watchdog, start via Scheduled Task). Pada saat uninstall, service
+         berhenti &amp; memanggil SetTaskManagerBlocked(false) di OnStop/StopAsync.
+         PIN uninstall diverifikasi lewat Overlay (verify-pin endpoint) oleh
+         admin yang sah. ===== -->
 </Wix>

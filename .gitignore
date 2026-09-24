@@ -213,3 +213,10 @@ PublishScripts/
 # JetBrains Rider
 .idea/
 *.iml
+# v3Netbill Agent build helpers
+.verify/
+artifacts/
+Installer/*DepFiles.wxs
+*.wixobj
+*.wixpdb
+*.wixir

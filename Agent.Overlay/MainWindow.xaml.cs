@@ -47,19 +47,23 @@ public partial class MainWindow : Window
         KeyDown += OnKeyDown; // for technician shortcut
     }
 
-    private async void OnLoaded(object sender, RoutedEventArgs e)
+    private void OnLoaded(object sender, RoutedEventArgs e)
     {
         _cts = new CancellationTokenSource();
-        try
+        // Jangan blocking: ConnectAsync sekarang loop reconnect terus-menerus.
+        _ = Task.Run(async () =>
         {
-            await _pipeClient.ConnectAsync(_cts.Token);
-            _logger.LogInformation("Overlay connected to Service");
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to connect to Service");
-        }
+            try
+            {
+                await _pipeClient.ConnectAsync(_cts.Token);
+                _logger.LogInformation("Overlay connected to Service");
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to connect to Service");
+            }
+        });
 
         // Initial UI state
         UpdateVisibility();

@@ -42,16 +42,30 @@ public class PipeClient : IDisposable
                 await _pipe.ConnectAsync(5000, ct);
                 _logger.LogInformation("Connected to Service");
 
+                // Minta state terkini setelah (re)connect agar overlay sinkron
+                await RequestStateAsync(ct);
+
                 _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 _readerTask = Task.Run(() => ReadLoopAsync(_cts.Token), _cts.Token);
-                return;
+                await _readerTask;
+                _logger.LogWarning("Pipa terputus — mencoba menyambungkan ulang...");
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Pipe connection failed, retrying in 2s...");
+            }
+            finally
+            {
+                _readerTask = null;
+                _cts?.Dispose();
+                _cts = null;
+            }
+            try
+            {
                 await Task.Delay(2000, ct);
             }
+            catch (OperationCanceledException) { throw; }
         }
     }
 
@@ -80,6 +94,12 @@ public class PipeClient : IDisposable
             }
         }
         _logger.LogInformation("Disconnected from Service");
+    }
+
+    /// <summary>Minta state terkini dari Service (dipakai usai connect/reconnect).</summary>
+    public async Task RequestStateAsync(CancellationToken ct = default)
+    {
+        await SendAsync(new PipeMessage(PipeMessageType.StateRequest, "{}"), ct);
     }
 
     public async Task SendAsync(PipeMessage msg, CancellationToken ct = default)
@@ -132,7 +152,8 @@ internal enum PipeMessageType
     LoginResult = 5,
     PinVerifyResult = 6,
     LoginRequest = 100,
-    PinVerifyRequest = 101
+    PinVerifyRequest = 101,
+    StateRequest = 102
 }
 
 internal record PipeMessage(PipeMessageType Type, string Payload);

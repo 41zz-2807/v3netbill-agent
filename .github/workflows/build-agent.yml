@@ -6,149 +6,208 @@ on:
     paths:
       - '**'
   workflow_dispatch:
-  # Tag-based release (optional)
-  # release:
-  #   types: [created]
 
 env:
   DOTNET_VERSION: '8.0.x'
   SOLUTION_FILE: 'v3NetbillAgent.sln'
-  AGENT_CORE_PROJECT: 'Agent.Core/Agent.Core.csproj'
-  AGENT_OVERLAY_PROJECT: 'Agent.Overlay/Agent.Overlay.csproj'
   AGENT_SERVICE_PROJECT: 'Agent.Service/Agent.Service.csproj'
-  INSTALLER_WXS: 'Installer/Product.wxs'
+  AGENT_OVERLAY_PROJECT: 'Agent.Overlay/Agent.Overlay.csproj'
   WIX_VERSION: '4.0.5'
+  MSI_OUT: 'v3NetbillAgentSetup.msi'
 
 jobs:
   build-agent:
     name: Build Agent (Windows)
     runs-on: windows-latest
-    timeout-minutes: 30
-    
+    timeout-minutes: 40
+
     steps:
       # ----- Checkout -----
       - name: Checkout repository
         uses: actions/checkout@v4
-      
+
       # ----- Setup .NET 8 -----
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
-      
+
       # ----- Restore -----
       - name: Restore dependencies
         run: dotnet restore ${{ env.SOLUTION_FILE }}
         working-directory: ${{ github.workspace }}
-      
-      # ----- Build Agent.Core (verify compiles) -----
-      - name: Build Agent.Core
-        run: dotnet build ${{ env.AGENT_CORE_PROJECT }} -c Release --no-restore
-        working-directory: ${{ github.workspace }}
-      
+
       # ----- Publish Agent.Service (self-contained win-x64) -----
       - name: Publish Agent.Service
         run: |
           dotnet publish ${{ env.AGENT_SERVICE_PROJECT }} `
-            -c Release `
-            -r win-x64 `
+            -c Release -r win-x64 `
             --self-contained true `
             -p:PublishSingleFile=false `
             -p:PublishTrimmed=false `
             -o ${{ github.workspace }}/artifacts/Agent.Service
         working-directory: ${{ github.workspace }}
-      
+
       # ----- Publish Agent.Overlay (self-contained win-x64) -----
       - name: Publish Agent.Overlay
         run: |
           dotnet publish ${{ env.AGENT_OVERLAY_PROJECT }} `
-            -c Release `
-            -r win-x64 `
+            -c Release -r win-x64 `
             --self-contained true `
             -p:PublishSingleFile=false `
             -p:PublishTrimmed=false `
             -o ${{ github.workspace }}/artifacts/Agent.Overlay
         working-directory: ${{ github.workspace }}
-      
-      # ----- Install WiX Toolset v4 -----
+
+      # ----- Pisahkan file "spesial" (exe/deps/runtimeconfig/appsettings) -----
+      # agar generator dep fragment tidak menduplikasi file yang di-declare manual.
+      - name: Prepare special files (exe/config)
+        shell: pwsh
+        run: |
+          $ws = "${{ github.workspace }}"
+          foreach ($pair in @(
+            @{ Src = "$ws/artifacts/Agent.Service"; Dst = "$ws/artifacts/Agent.Service.Special"; Exe = "Agent.Service" },
+            @{ Src = "$ws/artifacts/Agent.Overlay"; Dst = "$ws/artifacts/Agent.Overlay.Special"; Exe = "Agent.Overlay" }
+          )) {
+            New-Item -ItemType Directory -Force -Path $pair.Dst | Out-Null
+            foreach ($f in @("$($pair.Exe).exe", "$($pair.Exe).deps.json", "$($pair.Exe).runtimeconfig.json", "appsettings.json")) {
+              if (Test-Path "$($pair.Src)/$f") { Move-Item "$($pair.Src)/$f" "$($pair.Dst)/$f" }
+              else { Write-Error "File tidak ditemukan: $($pair.Src)/$f"; exit 1 }
+            }
+          }
+          Write-Host "Special files prepared."
+
+      # ----- Install WiX Toolset v4 + extensions -----
       - name: Install WiX Toolset
+        shell: pwsh
         run: |
           dotnet tool install --global wix --version ${{ env.WIX_VERSION }}
           echo "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          wix extension add --global WixToolset.UI.wixext/${{ env.WIX_VERSION }}
+
+      # ----- Generate dep fragments (wxs) dari sisa publish output -----
+      - name: Generate dependency fragments
         shell: pwsh
-      
-      # ----- Generate WiX fragments from publish output (heat) -----
-      - name: Generate WiX fragments (heat)
         run: |
-          # Generate component group for Agent.Service publish output
-          heat dir ${{ github.workspace }}/artifacts/Agent.Service `
-            -cg ServiceComponents `
-            -gg -sfrag -srd -dr INSTALLFOLDER `
-            -var var.AgentServicePublishDir `
-            -out ${{ github.workspace }}/Installer/ServiceComponents.wxs
-          
-          # Generate component group for Agent.Overlay publish output
-          heat dir ${{ github.workspace }}/artifacts/Agent.Overlay `
-            -cg OverlayComponents `
-            -gg -sfrag -srd -dr INSTALLFOLDER `
-            -var var.AgentOverlayPublishDir `
-            -out ${{ github.workspace }}/Installer/OverlayComponents.wxs
+          $ws = "${{ github.workspace }}"
+          function New-DepFragment([string]$Dir, [string]$DirRef, [string]$Var, [string]$Cg, [string]$Out) {
+            if (-not (Test-Path $Dir)) { Write-Error "Dir tidak ada: $Dir"; exit 1 }
+            $files = Get-ChildItem -LiteralPath $Dir -Recurse -File
+            $leaves = @{}
+            foreach ($f in $files) {
+              if ($leaves.ContainsKey($f.Name)) { Write-Error "Duplikat nama file: $($f.Name)"; exit 1 }
+              $leaves[$f.Name] = $true
+            }
+            $sb = New-Object System.Text.StringBuilder
+            [void]$sb.AppendLine('<?xml version="1.0" encoding="UTF-8"?>')
+            [void]$sb.AppendLine('<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">')
+            [void]$sb.AppendLine('  <Fragment>')
+            [void]$sb.AppendLine("    <ComponentGroup Id=`"$Cg`">")
+            $i = 0
+            foreach ($f in $files) {
+              $rel = $f.FullName.Substring($Dir.Length + 1).Replace('\', '/')
+              $src = "$Var$rel"
+              [void]$sb.AppendLine("      <Component Id=`"c_${Cg}_${i}`" Directory=`"$DirRef`" Guid=`"*`">")
+              [void]$sb.AppendLine("        <File Id=`"f_${Cg}_${i}`" Source=`"$src`" KeyPath=`"yes`" />")
+              [void]$sb.AppendLine('      </Component>')
+              $i++
+            }
+            [void]$sb.AppendLine('    </ComponentGroup>')
+            [void]$sb.AppendLine('  </Fragment>')
+            [void]$sb.AppendLine('</Wix>')
+            Set-Content -LiteralPath $Out -Value $sb.ToString() -Encoding utf8
+            Write-Host "$Out : $($files.Count) file"
+          }
+
+          New-DepFragment `
+            -Dir "$ws/artifacts/Agent.Service" `
+            -DirRef "SVCFOLDER" `
+            -Var '$(var.SvcDepDir)' `
+            -Cg "SvcDepComponents" `
+            -Out "$ws/Installer/SvcDepFiles.wxs"
+
+          New-DepFragment `
+            -Dir "$ws/artifacts/Agent.Overlay" `
+            -DirRef "OVERLAYFOLDER" `
+            -Var '$(var.OverlayDepDir)' `
+            -Cg "OverlayDepComponents" `
+            -Out "$ws/Installer/OverlayDepFiles.wxs"
+
+      # ----- Build MSI (wix build) -----
+      - name: Build MSI
         shell: pwsh
-        working-directory: ${{ github.workspace }}
-      
-      # ----- Build MSI with WiX (candle + light) -----
-      - name: Build MSI (candle)
         run: |
-          candle `
-            -dAgentServicePublishDir="${{ github.workspace }}\artifacts\Agent.Service\" `
-            -dAgentOverlayPublishDir="${{ github.workspace }}\artifacts\Agent.Overlay\" `
-            -ext WixToolset.Util.wixext `
-            -out ${{ github.workspace }}/Installer/ `
-            ${{ env.INSTALLER_WXS }} `
-            ${{ github.workspace }}/Installer/ServiceComponents.wxs `
-            ${{ github.workspace }}/Installer/OverlayComponents.wxs
-        shell: pwsh
-        working-directory: ${{ github.workspace }}
-      
-      - name: Build MSI (light)
-        run: |
-          light `
-            -ext WixToolset.Util.wixext `
+          $ws = "${{ github.workspace }}"
+          wix build `
+            "$ws/Installer/Product.wxs" `
+            "$ws/Installer/SvcDepFiles.wxs" `
+            "$ws/Installer/OverlayDepFiles.wxs" `
+            -d SvcPublishDir="$ws/artifacts/Agent.Service.Special\" `
+            -d SvcDepDir="$ws/artifacts/Agent.Service\" `
+            -d OverlayPublishDir="$ws/artifacts/Agent.Overlay.Special\" `
+            -d OverlayDepDir="$ws/artifacts/Agent.Overlay\" `
+            -d licenseRtf="$ws/Installer/license.rtf" `
             -ext WixToolset.UI.wixext `
-            -out ${{ github.workspace }}/artifacts/v3NetbillAgentSetup.msi `
-            ${{ github.workspace }}/Installer/Product.wixobj `
-            ${{ github.workspace }}/Installer/ServiceComponents.wixobj `
-            ${{ github.workspace }}/Installer/OverlayComponents.wixobj
-        shell: pwsh
-        working-directory: ${{ github.workspace }}
-      
+            -o "$ws/artifacts/${{ env.MSI_OUT }}"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host "MSI built:"
+          Get-Item "$ws/artifacts/${{ env.MSI_OUT }}" | Select-Object Name, Length
+
       # ----- Verify MSI -----
-      - name: Verify MSI
-        run: |
-          # Check MSI contents
-          msiexec /a "${{ github.workspace }}/artifacts/v3NetbillAgentSetup.msi" /qn TARGETDIR="${{ github.workspace }}/artifacts/msi-extract" 2>&1 | Out-Null
-          # Verify key files exist
-          Test-Path "${{ github.workspace }}/artifacts/msi-extract/Agent.Service.exe" | Should -Be $true
-          Test-Path "${{ github.workspace }}/artifacts/msi-extract/Agent.Overlay.exe" | Should -Be $true
-          Test-Path "${{ github.workspace }}/artifacts/msi-extract/appsettings.json" | Should -Be $true
-          Write-Host "MSI verification passed"
+      - name: Verify MSI contents
         shell: pwsh
-        working-directory: ${{ github.workspace }}
-      
+        run: |
+          $ws = "${{ github.workspace }}"
+          $extract = "$ws/artifacts/msi-extract"
+          msiexec /a "$ws/artifacts/${{ env.MSI_OUT }}" /qn TARGETDIR="$extract" 2>&1 | Out-Null
+          Start-Sleep -Seconds 2
+          $required = @(
+            "Agent.Service/Agent.Service.exe",
+            "Agent.Overlay/Agent.Overlay.exe",
+            "Agent.Service/appsettings.json",
+            "Agent.Overlay/appsettings.json"
+          )
+          foreach ($rel in $required) {
+            $p = Join-Path $extract $rel
+            if (-not (Test-Path $p)) { Write-Error "Missing in MSI: $rel"; exit 1 }
+            Write-Host "OK: $rel"
+          }
+          Write-Host "MSI verification passed."
+
       # ----- Upload Artifact -----
       - name: Upload MSI Artifact
         uses: actions/upload-artifact@v4
         with:
           name: v3NetbillAgentSetup
-          path: ${{ github.workspace }}/artifacts/v3NetbillAgentSetup.msi
+          path: ${{ github.workspace }}/artifacts/${{ env.MSI_OUT }}
           retention-days: 30
-      
-      # ----- Also upload publish outputs for debugging -----
-      - name: Upload Publish Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: v3NetbillAgent-Publish
-          path: |
-            ${{ github.workspace }}/artifacts/Agent.Service/**
-            ${{ github.workspace }}/artifacts/Agent.Overlay/**
-          retention-days: 7
+
+      # ----- Auto-upload MSI ke Backend (panel admin > Pengaturan > Installer) -----
+      - name: Upload MSI to Backend
+        env:
+          V3NETBILL_BACKEND_URL: ${{ secrets.V3NETBILL_BACKEND_URL }}
+          V3NETBILL_ADMIN_USER: ${{ secrets.V3NETBILL_ADMIN_USER }}
+          V3NETBILL_ADMIN_PASSWORD: ${{ secrets.V3NETBILL_ADMIN_PASSWORD }}
+        shell: pwsh
+        run: |
+          $ws = "${{ github.workspace }}"
+          if ([string]::IsNullOrEmpty($env:V3NETBILL_ADMIN_USER)) {
+            Write-Host "Secret V3NETBILL_ADMIN_USER belum diatur; lewati upload."; exit 0
+          }
+          try {
+            $login = Invoke-RestMethod -Method Post `
+              -Uri "$env:V3NETBILL_BACKEND_URL/api/auth/login" `
+              -ContentType "application/json" `
+              -Body (@{ username = $env:V3NETBILL_ADMIN_USER; password = $env:V3NETBILL_ADMIN_PASSWORD } | ConvertTo-Json)
+          } catch {
+            Write-Host "Gagal login backend: $($_.Exception.Message)"; exit 1
+          }
+          $token = $login.access_token
+          $msi = "$ws/artifacts/${{ env.MSI_OUT }}"
+          curl.exe -sS -f -o "$ws/upload-result.json" `
+            -X POST "$env:V3NETBILL_BACKEND_URL/api/settings/installer" `
+            -H "Authorization: Bearer $token" `
+            -F "file=@${msi};type=application/vnd.ms-installer"
+          if ($LASTEXITCODE -ne 0) { Write-Host "Upload gagal"; exit 1 }
+          Write-Host "MSI berhasil di-upload ke backend:"
+          Get-Content "$ws/upload-result.json"

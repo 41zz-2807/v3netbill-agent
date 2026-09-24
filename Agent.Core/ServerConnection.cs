@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using SocketIOClient;
+using SocketIOClient.Common;
 using V3Netbill.Agent.Core;
 
 namespace V3Netbill.Agent.Core;
@@ -65,10 +66,9 @@ public sealed class ServerConnection : IAsyncDisposable
         _client = new SocketIO(uri, new SocketIOOptions
         {
             // polling dulu, upgrade otomatis ke WebSocket (sesuai Socket.IO v4 / EIO=4)
-            EIO = 4,
+            EIO = EngineIO.V4,
             Reconnection = true,
             ReconnectionAttempts = 30,
-            ReconnectionDelay = 1000,
             ReconnectionDelayMax = 5000,
             ConnectionTimeout = TimeSpan.FromSeconds(30),
             AutoUpgrade = true,
@@ -87,7 +87,7 @@ public sealed class ServerConnection : IAsyncDisposable
         _client.OnConnected += OnConnected;
         _client.OnDisconnected += OnDisconnected;
         _client.OnError += (_, err) =>
-            _logger.LogError("Socket.IO error: {Message}", err.Message);
+            _logger.LogError("Socket.IO error: {Message}", err);
 
         _client.On("client:login_result", ctx =>
         {
@@ -118,17 +118,17 @@ public sealed class ServerConnection : IAsyncDisposable
         });
     }
 
-    private Task OnConnected(object sender, object e)
+    private void OnConnected(object? sender, EventArgs e)
     {
         _logger.LogInformation("Terhubung ke server ({Namespace}) — registrasi agent...", SESSION_NAMESPACE);
-        return RegisterAsync(_lifetimeCts.Token);
+        _ = RegisterAsync(_lifetimeCts.Token);
     }
 
-    private Task OnDisconnected(object sender, string reason)
+    private void OnDisconnected(object? sender, string reason)
     {
         _logger.LogWarning("Terputus dari server: {Reason} — akan reconnect otomatis.", reason);
         StopHeartbeat();
-        return Task.CompletedTask;
+        _registered = false; // izinkan register ulang saat reconnect berikutnya
     }
 
     /// <summary>Connect + register + mulai heartbeat. Idempotent.</summary>
@@ -144,7 +144,7 @@ public sealed class ServerConnection : IAsyncDisposable
     {
         if (_registered) return; // hanya sekali per koneksi
         await _client.EmitAsync("agent:register",
-            new { pcId = _pcId, agentToken = _agentToken }, ct);
+            [ new { pcId = _pcId, agentToken = _agentToken } ], ct);
         _registered = true;
         _logger.LogInformation("agent:register terkirim untuk PC {PcId}", _pcId);
     }
@@ -153,18 +153,18 @@ public sealed class ServerConnection : IAsyncDisposable
     public async Task SendHeartbeatAsync(CancellationToken ct = default)
     {
         if (!_client.Connected) return;
-        await _client.EmitAsync("agent:heartbeat", new { pcId = _pcId }, ct);
+        await _client.EmitAsync("agent:heartbeat", [ new { pcId = _pcId } ], ct);
         _logger.LogDebug("agent:heartbeat → PC {PcId}", _pcId);
     }
 
     /// <summary>Client (overlay) minta login voucher/member ke server.</summary>
     public async Task SendLoginRequestAsync(string kode, string password, CancellationToken ct = default)
     {
-        await _client.EmitAsync("client:login_request", new
+        await _client.EmitAsync("client:login_request", [ new
         {
             pcId = _pcId,
             kredensial = new { kode, password },
-        }, ct);
+        } ], ct);
         _logger.LogInformation("client:login_request untuk kode {Kode}", kode);
     }
 
