@@ -205,9 +205,14 @@ public class Worker : BackgroundService
                 await _serverConnection.SendStopSessionAsync(_cts?.Token ?? CancellationToken.None);
             }
             await ForceLockScreenAsync();
-            // Beri waktu 30 detik sebelum mati agar sesi/refund selesai di backend.
-            Process.Start(new ProcessStartInfo("shutdown", "/s /t 30 /c \"v3Netbill: PC dimatikan oleh admin\""));
-            AgentLog.Write("Shutdown terjadwal (30 detik) — PC dimatikan admin");
+            // Beri waktu 10 detik sebelum mati. /f = force (tidak menunggu aplikasi lain
+            // menutup) sehingga PC pasti mati walau ada program yang blocking.
+            var psi = new ProcessStartInfo("shutdown", "/s /f /t 10 /c \"v3Netbill: PC dimatikan oleh admin\"")
+            {
+                UseShellExecute = false,
+            };
+            Process.Start(psi);
+            AgentLog.Write("Shutdown terjadwal (10 detik, force) — PC dimatikan admin");
         }
         catch (Exception ex)
         {
