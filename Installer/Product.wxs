@@ -75,7 +75,7 @@
     </StandardDirectory>
 
     <StandardDirectory Id="StartupFolder" />
-    <StandardDirectory Id="ProgramsMenuFolder">
+    <StandardDirectory Id="ProgramMenuFolder">
       <Directory Id="ProgramMenuDir" Name="v3Netbill Agent" />
     </StandardDirectory>
 
@@ -179,9 +179,8 @@
                   Return="check" />
 
     <InstallExecuteSequence>
-      <Custom Action="UninstallGuardAction" Before="RemoveFiles">
-        REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE
-      </Custom>
+      <Custom Action="UninstallGuardAction" Before="RemoveFiles"
+              Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
     </InstallExecuteSequence>
 
     <!-- ===== Shortcuts (start menu): shortcut "Uninstall v3Netbill Agent" di
