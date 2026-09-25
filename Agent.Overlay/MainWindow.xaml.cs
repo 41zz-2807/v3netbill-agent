@@ -352,6 +352,12 @@ public partial class MainWindow : Window
         PinBox.Focus();
     }
 
+    private void AdminPinButton_Click(object sender, RoutedEventArgs e)
+    {
+        AgentLog.Write("Admin PIN dibuka via tombol layar");
+        ShowPinDialog();
+    }
+
     // Button click handlers
     private async void LoginButton_Click(object sender, RoutedEventArgs e)
     {

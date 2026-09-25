@@ -205,5 +205,17 @@
                            HorizontalAlignment="Center"/>
             </StackPanel>
         </Border>
+
+        <!-- Tombol Admin PIN — akses mode teknisi tanpa hotkey (aman remote via RustDesk) -->
+        <Button x:Name="AdminPinButton"
+                Content="Admin PIN"
+                Width="110" Height="36"
+                FontSize="12" FontWeight="SemiBold"
+                Background="#66000000" Foreground="#AAAAAA"
+                BorderThickness="1" BorderBrush="#33FFFFFF"
+                Cursor="Hand"
+                HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                Margin="16,0,0,12"
+                Click="AdminPinButton_Click"/>
     </Grid>
 </Window>
