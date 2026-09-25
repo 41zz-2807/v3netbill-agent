@@ -22,6 +22,19 @@ public partial class App : Application
         AgentLog.FileName = "overlay.log";
         AgentLog.Write("=== Agent Overlay starting ===");
 
+        // Mode UNINSTALL GUARD: dipanggil MSI (custom action Type 18) sebelum RemoveFiles.
+        // Menampilkan verifikasi PIN admin; exit code menentukan lanjut/batal uninstall.
+        foreach (var arg in e.Args)
+        {
+            if (string.Equals(arg, "--uninstall-guard", StringComparison.OrdinalIgnoreCase))
+            {
+                AgentLog.Write("Mode UNINSTALL GUARD aktif — verifikasi PIN admin");
+                var guard = new UninstallGuardWindow();
+                guard.Show();
+                return;
+            }
+        }
+
         // Mode maintenance: flag stop ada → jangan jalankan overlay.
         string stopFlag = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments),

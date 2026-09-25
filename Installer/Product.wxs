@@ -21,7 +21,7 @@
 
   <Package UpgradeCode="7f3a9b1e-5c2d-4a8f-9e1b-3d6c8f4a2b7e"
            Name="v3Netbill Agent"
-           Version="1.0.4.0"
+           Version="1.0.5.0"
            Manufacturer="v3Netbill"
            Language="1033"
            Codepage="65001"
@@ -47,6 +47,7 @@
       <ComponentGroupRef Id="OverlayDepComponents" />    <!-- dari generator -->
       <ComponentGroupRef Id="ConfigComponents" />
       <ComponentGroupRef Id="OverlayStartupComponents" />
+      <ComponentGroupRef Id="UninstallShortcutComponents" />
     </Feature>
 
     <!-- ===== Properties (input pengguna) ===== -->
@@ -58,10 +59,12 @@
       <RegistrySearch Id="PrefillAgentToken" Root="HKLM" Key="Software\v3Netbill\Agent" Name="AgentToken" Type="raw" />
     </Property>
 
-    <!-- ===== ARP hardening: sembunyikan Remove & Repair di Apps & Features.
-         Uninstall tetap bisa via msiexec /x (dilindungi PIN) — lihat catatan di bawah. ===== -->
-    <Property Id="ARPNOREMOVE" Value="1" />
-    <Property Id="ARPNOREPAIR" Value="1" />
+    <!-- ===== Uninstall protection: PIN admin (diverifikasi backend) memakai
+         custom action Type 18 (Agent.Overlay.exe --uninstall-guard) sebelum
+         RemoveFiles. Tombol Remove/Repair di Apps & Features dibiarkan aktif
+         agar uninstall tetap bisa dijalankan — tapi siapa pun yang mencoba
+         harus memasukkan PIN Uninstall yang diset Admin di dashboard. =====
+         (ARPNOREMOVE/ARPNOREPAIR tidak lagi dipakai.) -->
 
     <!-- ===== Directories ===== -->
     <StandardDirectory Id="ProgramFilesFolder">
@@ -72,6 +75,9 @@
     </StandardDirectory>
 
     <StandardDirectory Id="StartupFolder" />
+    <StandardDirectory Id="ProgramsMenuFolder">
+      <Directory Id="ProgramMenuDir" Name="v3Netbill Agent" />
+    </StandardDirectory>
 
     <!-- ===== Service (komponen manual: exe + service install/control) ===== -->
     <ComponentGroup Id="SvcExeComponents">
@@ -145,6 +151,38 @@
                        Name="OverlayStartup" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </ComponentGroup>
+
+    <!-- ===== Shortcut uninstall (Start Menu): jalankan msiexec /x [ProductCode].
+         Custom action di bawah yang memastikan PIN admin keburu diverifikasi. ===== -->
+    <ComponentGroup Id="UninstallShortcutComponents">
+      <Component Id="UninstallShortcut" Directory="ProgramMenuDir"
+                 Guid="{e5f6a7b8-c9d0-1234-5678-fedcba987654}">
+        <Shortcut Id="UninstallShortcutLink"
+                  Name="Uninstall v3Netbill Agent"
+                  Target="[SystemFolder]msiexec.exe"
+                  Arguments="/x [ProductCode]"
+                  Description="Uninstall v3Netbill Agent (meminta PIN admin)" />
+        <RemoveFolder Id="RemoveProgramMenuDir" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\v3Netbill\Agent"
+                       Name="UninstallShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- ===== Verifikasi PIN sebelum uninstall berjalan (Type 18 exe CA).
+         MenjalankanAgent.Overlay.exe --uninstall-guard tepat sebelum RemoveFiles.
+         Exit 0 = lanjut, non-zero = batal uninstall. Hanya uninstall murni
+         (REMOVE="ALL"), TIDAK saat major upgrade (UPGRADINGPRODUCTCODE). ===== -->
+    <CustomAction Id="UninstallGuardAction"
+                  FileRef="AgentOverlayExeFile"
+                  ExeCommand="--uninstall-guard"
+                  Execute="immediate"
+                  Return="check" />
+
+    <InstallExecuteSequence>
+      <Custom Action="UninstallGuardAction" Before="RemoveFiles">
+        REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE
+      </Custom>
+    </InstallExecuteSequence>
 
     <!-- ===== Shortcuts (start menu): TIDAK ada shortcut uninstall (hardening).
          Agent tidak boleh di-uninstall user biasa; hanya lewat msiexec /x
@@ -260,13 +298,15 @@
     </Fragment>
 
     <!-- ===== Catatan uninstall protection =====
-         Proteksi utama dilakukan oleh Agent.Service (registry DisableTaskMgr,
-         watchdog, start via Scheduled Task). Pada saat uninstall, service
-         berhenti &amp; memanggil SetTaskManagerBlocked(false) di OnStop/StopAsync.
-         PIN uninstall diverifikasi lewat Overlay (verify-pin endpoint) oleh
-         admin yang sah; uninstall hanya lewat msiexec /x (tanpa tombol
-         Remove/Repair di Apps &amp; Features dan tanpa shortcut uninstall).
-         Watchdog scheduled task (Agent Watchdog, tiap 1 menit) dibuat oleh
-         service saat start; menjalankan watchdog.cmd yang menghidupkan kembali
-         service bila dimatikan manual. ===== -->
+         Uninstall TETAP tersedia (tombol Remove di Apps & Features + shortcut
+         Start Menu "Uninstall v3Netbill Agent"). Namun setiap uninstall murni
+         melewati custom action UninstallGuardAction (Type 18) yang menjalankan
+         Agent.Overlay.exe --uninstall-guard sebelum RemoveFiles: admin harus
+         memasukkan PIN Uninstall (diset di dashboard, diverifikasi via
+         POST /api/settings/verify-pin). Salah PIN / server tak terjangkau →
+         uninstall dibatalkan (Return="check"). Major upgrade TIDAK meminta PIN
+         (kondisi NOT UPGRADINGPRODUCTCODE).
+         Proteksi lain tetap: registry DisableTaskMgr (0 saat desktop normal),
+         watchdog scheduled task restart service tiap 1 menit. Saat uninstall,
+         service berhenti &amp; memanggil SetTaskManagerBlocked(false). ===== -->
 </Wix>
