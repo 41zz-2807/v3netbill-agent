@@ -21,7 +21,7 @@
 
   <Package UpgradeCode="7f3a9b1e-5c2d-4a8f-9e1b-3d6c8f4a2b7e"
            Name="v3Netbill Agent"
-           Version="1.0.1.0"
+           Version="1.0.2.0"
            Manufacturer="v3Netbill"
            Language="1033"
            Codepage="65001"
@@ -47,7 +47,6 @@
       <ComponentGroupRef Id="OverlayDepComponents" />    <!-- dari generator -->
       <ComponentGroupRef Id="ConfigComponents" />
       <ComponentGroupRef Id="OverlayStartupComponents" />
-      <ComponentGroupRef Id="ShortcutComponents" />
     </Feature>
 
     <!-- ===== Properties (input pengguna) ===== -->
@@ -59,16 +58,17 @@
       <RegistrySearch Id="PrefillAgentToken" Root="HKLM" Key="Software\v3Netbill\Agent" Name="AgentToken" Type="raw" />
     </Property>
 
+    <!-- ===== ARP hardening: sembunyikan Remove & Repair di Apps & Features.
+         Uninstall tetap bisa via msiexec /x (dilindungi PIN) — lihat catatan di bawah. ===== -->
+    <Property Id="ARPNOREMOVE" Value="1" />
+    <Property Id="ARPNOREPAIR" Value="1" />
+
     <!-- ===== Directories ===== -->
     <StandardDirectory Id="ProgramFilesFolder">
       <Directory Id="INSTALLFOLDER" Name="v3NetbillAgent">
         <Directory Id="SVCFOLDER" Name="Agent.Service" />
         <Directory Id="OVERLAYFOLDER" Name="Agent.Overlay" />
       </Directory>
-    </StandardDirectory>
-
-    <StandardDirectory Id="ProgramMenuFolder">
-      <Directory Id="ApplicationProgramsFolder" Name="v3Netbill Agent" />
     </StandardDirectory>
 
     <StandardDirectory Id="StartupFolder" />
@@ -146,20 +146,9 @@
       </Component>
     </ComponentGroup>
 
-    <!-- ===== Shortcuts ===== -->
-    <ComponentGroup Id="ShortcutComponents">
-      <Component Id="UninstallShortcut" Directory="ApplicationProgramsFolder"
-                 Guid="{e5f6a7b8-c9d0-1234-ef01-234567890123}">
-        <Shortcut Id="UninstallShortcut"
-                  Name="Uninstall v3Netbill Agent"
-                  Target="[SystemFolder]msiexec.exe"
-                  Arguments="/x [ProductCode]"
-                  Description="Uninstall v3Netbill Agent" />
-        <RemoveFolder Id="RemoveAppProgramsFolder" On="uninstall" />
-        <RegistryValue Root="HKCU" Key="Software\v3Netbill\Agent"
-                       Name="Installed" Type="integer" Value="1" KeyPath="yes" />
-      </Component>
-    </ComponentGroup>
+    <!-- ===== Shortcuts (start menu): TIDAK ada shortcut uninstall (hardening).
+         Agent tidak boleh di-uninstall user biasa; hanya lewat msiexec /x
+         yang dilindungi PIN (verify-pin) seperti dijelaskan di catatan akhir. ===== -->
   </Package>
 
     <!-- ===== UI: dialog config + override sequence WixUI_InstallDir ===== -->
@@ -275,5 +264,9 @@
          watchdog, start via Scheduled Task). Pada saat uninstall, service
          berhenti &amp; memanggil SetTaskManagerBlocked(false) di OnStop/StopAsync.
          PIN uninstall diverifikasi lewat Overlay (verify-pin endpoint) oleh
-         admin yang sah. ===== -->
+         admin yang sah; uninstall hanya lewat msiexec /x (tanpa tombol
+         Remove/Repair di Apps &amp; Features dan tanpa shortcut uninstall).
+         Watchdog scheduled task (Agent Watchdog, tiap 1 menit) dibuat oleh
+         service saat start; menjalankan watchdog.cmd yang menghidupkan kembali
+         service bila dimatikan manual. ===== -->
 </Wix>

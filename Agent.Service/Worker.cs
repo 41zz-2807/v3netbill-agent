@@ -78,6 +78,10 @@ public class Worker : BackgroundService
             : cfgExe!;
         AgentLog.Write($"Config: serverUrl={serverUrl}, pcId={pcId}, overlayExe={_overlayExePath}");
 
+        // Watchdog scheduled task: jalankan tiap menit; kalau service berhenti (di-stop manual),
+        // hasilkan kembali. Bertahan dari reboot & menjadikan agent sulit dimatikan.
+        EnsureWatchdogScheduledTask();
+
         _cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         _serverConnection = new ServerConnection(serverUrl, pcId, agentToken, _logger);
 
@@ -465,6 +469,51 @@ public class Worker : BackgroundService
         {
             _logger.LogError(ex, "Failed to restart Agent.Overlay");
             AgentLog.Write(ex, "Gagal restart Agent.Overlay");
+        }
+    }
+
+    private void EnsureWatchdogScheduledTask()
+    {
+        try
+        {
+            const string taskName = @"\v3Netbill\Agent Watchdog";
+            string scriptPath = Path.Combine(AppContext.BaseDirectory, "watchdog.cmd");
+            string queryArgs = $"/Query /TN \"{taskName}\"";
+            using (var chk = Process.Start(new ProcessStartInfo("schtasks", queryArgs)
+                   { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true }))
+            {
+                if (chk != null)
+                {
+                    chk.WaitForExit(5000);
+                    if (chk.ExitCode == 0)
+                    {
+                        AgentLog.Write("Watchdog scheduled task sudah ada — tidak perlu dibuat ulang");
+                        return;
+                    }
+                }
+            }
+
+            string createArgs =
+                $"/Create /F /TN \"{taskName}\" /TR \"{scriptPath}\" " +
+                "/SC MINUTE /MO 1 /RU SYSTEM /RL HIGHEST";
+            using (var pr = Process.Start(new ProcessStartInfo("schtasks", createArgs)
+                   { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true }))
+            {
+                if (pr == null)
+                {
+                    AgentLog.Write("Watchdog scheduled task GAGAL dibuat (Process.Start null)");
+                    return;
+                }
+                pr.WaitForExit(8000);
+                AgentLog.Write(pr.ExitCode == 0
+                    ? "Watchdog scheduled task berhasil dibuat (tiap 1 menit, SYSTEM)"
+                    : $"Watchdog scheduled task GAGAL dibuat: {pr.ExitCode} {pr.StandardError.ReadToEnd()}");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to ensure watchdog scheduled task");
+            AgentLog.Write(ex, "Gagal membuat watchdog scheduled task");
         }
     }
 
