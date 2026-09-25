@@ -44,6 +44,27 @@ public class PipeClient : IDisposable
                 _logger.LogInformation("Connecting to Service via named pipe...");
                 AgentLog.Write("Pipe: mencoba connect ke service...");
                 await _pipe.ConnectAsync(5000, ct);
+                // Server pipe dibuat PIPE_READMODE_MESSAGE (melihat SecureNamedPipe).
+                // Kalau client tetap byte mode, beberapa pesan yang dikirim berurutan
+                // (StateUpdate + SessionStarted, atau tick) bisa tergabung dalam satu
+                // baca → JSON tidak valid → SessionStarted/SessionTick "hilang".
+                // Set Message pada kedua arah agar satu ReadAsync = satu pesan utuh.
+                try
+                {
+                    // Server pipe dibuat PIPE_READMODE_MESSAGE (lihat SecureNamedPipe).
+                    // Kalau client tetap byte mode, beberapa pesan yang dikirim berurutan
+                    // (StateUpdate + SessionStarted, atau tick) bisa tergabung dalam satu
+                    // baca → JSON tidak valid → SessionStarted/SessionTick "hilang".
+                    // Set arah baca ke Message agar satu ReadAsync = satu pesan utuh.
+                    // (Tulisan client tidak perlu diubah: WriteFile tetap jadi 1 message
+                    // di sisi server walau server pakai message mode.)
+                    _pipe.ReadMode = System.IO.Pipes.PipeTransmissionMode.Message;
+                    _logger.LogInformation("Pipe read mode = Message");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Pipe mode gagal diset — lanjut byte mode");
+                }
                 _logger.LogInformation("Connected to Service");
                 AgentLog.Write("Pipe: TERHUBUNG ke service");
 

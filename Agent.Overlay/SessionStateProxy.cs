@@ -11,7 +11,7 @@ namespace V3Netbill.Agent.Overlay;
 /// </summary>
 public class SessionStateProxy : INotifyPropertyChanged
 {
-    private readonly ILogger<SessionStateProxy> _logger;
+private readonly ILogger<SessionStateProxy> _logger;
     private bool _locked = true;
     private string? _sessionId;
     private int _durasiDetik;
@@ -19,6 +19,7 @@ public class SessionStateProxy : INotifyPropertyChanged
     private string? _akunKode;
     private string? _akunNama;
     private string? _akunTipe;
+    private DateTime _lastTickUtc = DateTime.MinValue;
 
     public SessionStateProxy(ILogger<SessionStateProxy> logger)
     {
@@ -145,6 +146,20 @@ public class SessionStateProxy : INotifyPropertyChanged
         }
     }
 
+    /// <summary>Kurangi sisa detik lokal 1 langkah (fallback countdown bila tick pipe terlewat).</summary>
+    public void DecaySisaDetik()
+    {
+        if (Locked) return;
+        if (SisaDetik <= 0) return;
+        SisaDetik = SisaDetik - 1;
+    }
+
+    /// <summary>Sudah cukup lama tanpa tick dari server — layak memakai fallback decay lokal.</summary>
+    public bool IsTickStale()
+    {
+        return (DateTime.UtcNow - _lastTickUtc).TotalSeconds > 3;
+    }
+
     public void ApplyStateUpdate(string json)
     {
         try
@@ -175,6 +190,7 @@ public class SessionStateProxy : INotifyPropertyChanged
         {
             var data = JsonConvert.DeserializeObject<TickPayload>(json);
             if (data == null) return;
+            _lastTickUtc = DateTime.UtcNow;
             SisaDetik = data.SisaDetik;
         }
         catch (Exception ex)

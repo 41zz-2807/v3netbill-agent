@@ -9,6 +9,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -38,6 +39,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _cts;
     private MemoryStream? _wallpaperStream;
     private bool _emergencyExit;
+    private DispatcherTimer? _countdownTimer;
 
     private const string EmergencyPin = "123456";
     private static readonly string StopFlagPath =
@@ -83,6 +85,15 @@ public partial class MainWindow : Window
         // Initial UI state
         UpdateVisibility();
         UpdateWindowState();
+
+        // Timer cadangan countdown: kalau tick dari server terlewat (pipe rekanan lambat),
+        // sisa waktu tetap berkurang setiap detik sehingga tampilan countdown tidak "beku".
+        _countdownTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _countdownTimer.Tick += (_, _) =>
+        {
+            if (_stateProxy.IsTickStale()) _stateProxy.DecaySisaDetik();
+        };
+        _countdownTimer.Start();
 
         // Ambil wallpaper dari backend (jika ada) untuk background layar kunci.
         _ = LoadWallpaperAsync();
@@ -170,6 +181,7 @@ public partial class MainWindow : Window
             CountdownCard.Visibility = Visibility.Collapsed;
             LoginCard.Visibility = Visibility.Visible;
             MiniPanel.Visibility = Visibility.Collapsed;
+            AdminPinButton.Visibility = Visibility.Visible;
         }
         else if (sessionActive)
         {
@@ -177,6 +189,7 @@ public partial class MainWindow : Window
             OverlayBackground.Visibility = Visibility.Collapsed;
             ContentPanel.Visibility = Visibility.Collapsed;
             MiniPanel.Visibility = Visibility.Visible;
+            AdminPinButton.Visibility = Visibility.Collapsed;
         }
         else
         {
@@ -184,6 +197,7 @@ public partial class MainWindow : Window
             OverlayBackground.Visibility = Visibility.Collapsed;
             ContentPanel.Visibility = Visibility.Collapsed;
             MiniPanel.Visibility = Visibility.Collapsed;
+            AdminPinButton.Visibility = Visibility.Collapsed;
         }
     }
 
@@ -209,7 +223,7 @@ public partial class MainWindow : Window
             WindowState = WindowState.Normal;
             ResizeMode = ResizeMode.NoResize;
             Width = 340;
-            Height = 230;
+            Height = 268;
             Left = SystemParameters.WorkArea.Right - Width - 16;
             Top = 16;
             Topmost = true;
@@ -484,6 +498,7 @@ public partial class MainWindow : Window
 
         _logger.LogWarning("EMERGENCY STOP — overlay ditutup, masuk mode maintenance");
         _emergencyExit = true;
+        _countdownTimer?.Stop();
         _keyboardHook.Disable();
         Application.Current.Shutdown();
     }
