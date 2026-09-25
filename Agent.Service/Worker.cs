@@ -68,7 +68,10 @@ public class Worker : BackgroundService
         var serverUrl = GetConfig("Server:Url", "ServerUrl", "http://localhost:3000");
         var pcId = GetConfig("Agent:PcId", "PcId", "PC001");
         var agentToken = GetConfig("Agent:Token", "AgentToken", "CHANGE_ME");
-        _overlayExePath = _configuration["Overlay:ExePath"] ?? Path.Combine(AppContext.BaseDirectory, "..", "Agent.Overlay", "Agent.Overlay.exe");
+        var cfgExe = _configuration["Overlay:ExePath"];
+        _overlayExePath = string.IsNullOrWhiteSpace(cfgExe)
+            ? Path.Combine(AppContext.BaseDirectory, "..", "Agent.Overlay", "Agent.Overlay.exe")
+            : cfgExe!;
         AgentLog.Write($"Config: serverUrl={serverUrl}, pcId={pcId}, overlayExe={_overlayExePath}");
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
@@ -192,8 +195,8 @@ public class Worker : BackgroundService
                 try
                 {
                     // Izinkan semua user (termasuk user sesi interaktif) untuk connect ke pipe service.
-                    SecureNamedPipe.GrantEveryoneAccess(pipeName);
-                    AgentLog.Write("Pipe ACL Everyone di-set (siap menerima koneksi)");
+                    SecureNamedPipe.GrantEveryoneAccess(_pipeServer.SafePipeHandle, pipeName);
+                    AgentLog.Write("ACL pipe selesai diproses (server siap menerima koneksi)");
                 }
                 catch (Exception aclEx)
                 {
