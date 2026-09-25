@@ -29,7 +29,8 @@ internal enum PipeMessageType
     // Overlay → Service
     LoginRequest = 100,     // Login request (kode, password)
     PinVerifyRequest = 101, // PIN verify request (pin)
-    StateRequest = 102      // Overlay minta state terkini (setelah reconnect)
+    StateRequest = 102,     // Overlay minta state terkini (setelah reconnect)
+    StopSessionRequest = 103 // Overlay minta hentikan sesi yang berjalan (stop sendiri)
 }
 
 internal record PipeMessage(PipeMessageType Type, string Payload);
@@ -136,6 +137,18 @@ public class Worker : BackgroundService
         }
         SetTaskManagerBlocked(false);
         _ = SendStateUpdateAsync();
+        // Kirim identitas akun ke overlay (untuk window mini: "login sebagai siapa").
+        var akun = e.Payload.Account;
+        if (akun != null)
+        {
+            _ = SendToOverlayAsync(new PipeMessage(PipeMessageType.SessionStarted, JsonConvert.SerializeObject(new
+            {
+                kodeUnik = akun.KodeUnik,
+                nama = akun.Nama,
+                tipe = akun.Tipe,
+            })));
+        }
+        AgentLog.Write($"SessionStarted: sessionId={e.Payload.SessionId}, durasi={e.Payload.DurasiDetik}s, akun={(akun?.Nama ?? akun?.KodeUnik ?? "?")} ({akun?.Tipe ?? "?"})");
     }
 
     private void OnSessionTicked(object? sender, SessionTickEventArgs e)
@@ -278,6 +291,15 @@ public class Worker : BackgroundService
             case PipeMessageType.StateRequest:
                 {
                     await SendStateUpdateAsync();
+                    break;
+                }
+            case PipeMessageType.StopSessionRequest:
+                {
+                    AgentLog.Write("Terima StopSessionRequest dari overlay — minta stop sesi ke backend");
+                    if (_serverConnection != null)
+                    {
+                        await _serverConnection.SendStopSessionAsync(ct);
+                    }
                     break;
                 }
         }

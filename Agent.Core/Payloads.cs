@@ -39,6 +39,23 @@ public sealed class SessionStartPayload
 
     [JsonPropertyName("durasiDetikTersedia")]
     public int DurasiDetik { get; set; }
+
+    /// <summary>Identitas akun dari backend (kodeUnik/nama/tipe) — untuk ditampilkan di window mini.</summary>
+    [JsonPropertyName("account")]
+    public AccountInfoPayload? Account { get; set; }
+}
+
+/// <summary>Identitas akun yang login (voucher/member).</summary>
+public sealed class AccountInfoPayload
+{
+    [JsonPropertyName("kodeUnik")]
+    public string? KodeUnik { get; set; }
+
+    [JsonPropertyName("nama")]
+    public string? Nama { get; set; }
+
+    [JsonPropertyName("tipe")]
+    public string? Tipe { get; set; }
 }
 
 /// <summary>Event <c>session:tick</c> — update countdown tiap interval.</summary>

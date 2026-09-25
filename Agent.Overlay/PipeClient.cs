@@ -140,6 +140,11 @@ public class PipeClient : IDisposable
         await SendAsync(new PipeMessage(PipeMessageType.PinVerifyRequest, payload), ct);
     }
 
+    public async Task SendStopSessionRequestAsync(CancellationToken ct = default)
+    {
+        await SendAsync(new PipeMessage(PipeMessageType.StopSessionRequest, "{}"), ct);
+    }
+
     public void Dispose()
     {
         _cts?.Cancel();
@@ -160,7 +165,8 @@ public enum PipeMessageType
     PinVerifyResult = 6,
     LoginRequest = 100,
     PinVerifyRequest = 101,
-    StateRequest = 102
+    StateRequest = 102,
+    StopSessionRequest = 103
 }
 
 public record PipeMessage(PipeMessageType Type, string Payload);

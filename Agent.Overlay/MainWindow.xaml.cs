@@ -173,7 +173,7 @@ public partial class MainWindow : Window
         }
         else if (sessionActive)
         {
-            // Desktop usable + chip countdown
+            // Desktop usable + mini window interaktif
             OverlayBackground.Visibility = Visibility.Collapsed;
             ContentPanel.Visibility = Visibility.Collapsed;
             MiniPanel.Visibility = Visibility.Visible;
@@ -203,19 +203,19 @@ public partial class MainWindow : Window
         }
         else if (_stateProxy.SisaDetik > 0)
         {
-            // Chip countdown mode — desktop tetap bisa dipakai
-            SetNoActivate(true);
+            // Mini window — desktop tetap bisa dipakai, window bisa di-minimize tapi tidak bisa di-close
+            SetNoActivate(false);
             WindowStyle = WindowStyle.None;
             WindowState = WindowState.Normal;
             ResizeMode = ResizeMode.NoResize;
-            Width = 300;
-            Height = 96;
+            Width = 340;
+            Height = 230;
             Left = SystemParameters.WorkArea.Right - Width - 16;
             Top = 16;
             Topmost = true;
-            ShowInTaskbar = false;
+            ShowInTaskbar = true;   // biar bisa di-restore dari taskbar setelah di-minimize
             _keyboardHook.Disable();
-            _logger.LogInformation("Overlay → SESSION (chip countdown, hook disabled)");
+            _logger.LogInformation("Overlay → SESSION (mini window, hook disabled)");
         }
         else
         {
@@ -267,6 +267,9 @@ public partial class MainWindow : Window
                     break;
                 case PipeMessageType.SessionTick:
                     _stateProxy.ApplySessionTick(msg.Payload);
+                    break;
+                case PipeMessageType.SessionStarted:
+                    _stateProxy.ApplySessionStarted(msg.Payload);
                     break;
                 case PipeMessageType.SessionStopped:
                     _stateProxy.ApplySessionStopped(msg.Payload);
@@ -356,6 +359,44 @@ public partial class MainWindow : Window
     {
         AgentLog.Write("Admin PIN dibuka via tombol layar");
         ShowPinDialog();
+    }
+
+    private void MinimizeMiniButton_Click(object sender, RoutedEventArgs e)
+    {
+        // Hanya minimize — window tidak boleh di-close (OnClosing selalu cancel).
+        WindowState = WindowState.Minimized;
+        AgentLog.Write("Sesi: window mini di-minimize");
+    }
+
+    private bool _stopConfirmArmed;
+    private DateTime _stopConfirmAt;
+
+    private async void StopSesiButton_Click(object sender, RoutedEventArgs e)
+    {
+        // Konfirmasi dua langkah: klik sekali → status, klik lagi → kirim stop.
+        if (!_stopConfirmArmed || (DateTime.Now - _stopConfirmAt).TotalSeconds > 5)
+        {
+            _stopConfirmArmed = true;
+            _stopConfirmAt = DateTime.Now;
+            MiniStatusText.Text = "Klik STOP SESI sekali lagi untuk konfirmasi...";
+            MiniStatusText.Visibility = Visibility.Visible;
+            AgentLog.Write("Stop sesi: minta konfirmasi (klik kedua)");
+            return;
+        }
+
+        _stopConfirmArmed = false;
+        MiniStatusText.Visibility = Visibility.Collapsed;
+
+        if (!_pipeClient.IsConnected)
+        {
+            MiniStatusText.Text = "Belum tersambung ke service — coba lagi";
+            MiniStatusText.Visibility = Visibility.Visible;
+            AgentLog.Write("Stop sesi dicegah: pipe belum terhubung");
+            return;
+        }
+
+        AgentLog.Write("Kirim StopSessionRequest ke service");
+        await _pipeClient.SendStopSessionRequestAsync();
     }
 
     // Button click handlers

@@ -16,6 +16,9 @@ public class SessionStateProxy : INotifyPropertyChanged
     private string? _sessionId;
     private int _durasiDetik;
     private int _sisaDetik;
+    private string? _akunKode;
+    private string? _akunNama;
+    private string? _akunTipe;
 
     public SessionStateProxy(ILogger<SessionStateProxy> logger)
     {
@@ -71,6 +74,57 @@ public class SessionStateProxy : INotifyPropertyChanged
     }
 
     public bool IsLocked => Locked;
+
+    public string? AkunKode
+    {
+        get => _akunKode;
+        private set
+        {
+            if (_akunKode == value) return;
+            _akunKode = value;
+            OnPropertyChanged(nameof(AkunKode));
+            OnPropertyChanged(nameof(AkunLabel));
+        }
+    }
+
+    public string? AkunNama
+    {
+        get => _akunNama;
+        private set
+        {
+            if (_akunNama == value) return;
+            _akunNama = value;
+            OnPropertyChanged(nameof(AkunNama));
+            OnPropertyChanged(nameof(AkunLabel));
+        }
+    }
+
+    public string? AkunTipe
+    {
+        get => _akunTipe;
+        private set
+        {
+            if (_akunTipe == value) return;
+            _akunTipe = value;
+            OnPropertyChanged(nameof(AkunTipe));
+            OnPropertyChanged(nameof(AkunLabel));
+        }
+    }
+
+    /// <summary>Label identitas akun: "VOUCHER 123456" atau "MEMBER nama"/"MEMBERSHIP nama".</summary>
+    public string AkunLabel
+    {
+        get
+        {
+            string tipe = AkunTipe == "MEMBER" ? "MEMBER" : "VOUCHER";
+            string identitas = !string.IsNullOrWhiteSpace(AkunNama)
+                ? AkunNama!
+                : !string.IsNullOrWhiteSpace(AkunKode)
+                    ? AkunKode!
+                    : "-";
+            return $"{tipe} / {identitas}";
+        }
+    }
 
     public string CountdownText
     {
@@ -131,6 +185,26 @@ public class SessionStateProxy : INotifyPropertyChanged
         SessionId = null;
         DurasiDetik = 0;
         SisaDetik = 0;
+        AkunKode = null;
+        AkunNama = null;
+        AkunTipe = null;
+    }
+
+    public void ApplySessionStarted(string json)
+    {
+        try
+        {
+            var data = JsonConvert.DeserializeObject<SessionStartedPayload>(json);
+            if (data == null) return;
+            AkunKode = data.KodeUnik;
+            AkunNama = data.Nama;
+            AkunTipe = data.Tipe;
+            _logger.LogInformation("Session started sebagai: {Label}", AkunLabel);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to parse session started");
+        }
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -139,5 +213,6 @@ public class SessionStateProxy : INotifyPropertyChanged
         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
     private record StateUpdatePayload(bool Locked, string? SessionId, int DurasiDetik, int SisaDetik);
+    private record SessionStartedPayload(string? KodeUnik, string? Nama, string? Tipe);
     private record TickPayload(int SisaDetik);
 }

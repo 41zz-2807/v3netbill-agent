@@ -168,6 +168,14 @@ public sealed class ServerConnection : IAsyncDisposable
         _logger.LogInformation("client:login_request untuk kode {Kode}", kode);
     }
 
+    /// <summary>Client (overlay) minta berhenti dari sesi yang sedang berjalan.</summary>
+    public async Task SendStopSessionAsync(CancellationToken ct = default)
+    {
+        if (!_client.Connected) return;
+        await _client.EmitAsync("client:stop_session", [ new { pcId = _pcId } ], ct);
+        _logger.LogInformation("client:stop_session dikirim untuk PC {PcId}", _pcId);
+    }
+
     private void StartHeartbeat()
     {
         _heartbeatTimer ??= new Timer(

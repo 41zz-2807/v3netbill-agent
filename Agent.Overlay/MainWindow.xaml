@@ -183,26 +183,103 @@
             </Border>
         </StackPanel>
 
-        <!-- Mini countdown chip (visible while session active, desktop usable) -->
+        <!-- Mini countdown window (visible while session active, desktop usable) -->
         <Border x:Name="MiniPanel" 
-                Background="#E61E1E24" 
+                Background="#F01E1E24" 
                 CornerRadius="12" 
-                Padding="16,10"
+                BorderBrush="#2EFFFFFF" BorderThickness="1"
                 HorizontalAlignment="Right" 
                 VerticalAlignment="Top" 
                 Margin="16"
-                IsHitTestVisible="False"
                 Visibility="Collapsed">
-            <StackPanel>
-                <TextBlock Text="SISA WAKTU" 
-                           FontSize="12" FontWeight="SemiBold" 
+            <StackPanel Width="300">
+                <!-- Header: judul + tombol minimize (tidak ada tombol close) -->
+                <Grid Margin="14,10,8,6">
+                    <TextBlock Text="V3 NETBILL — SESI AKTIF"
+                               FontSize="11" FontWeight="SemiBold"
+                               Foreground="#00D4AA"
+                               VerticalAlignment="Center"/>
+                    <Button x:Name="MinimizeMiniButton"
+                            Content="&#x2013;"
+                            Width="26" Height="26"
+                            FontSize="16" FontWeight="Bold"
+                            Background="#2EFFFFFF" Foreground="#DDDDDD"
+                            BorderThickness="0" Cursor="Hand"
+                            HorizontalAlignment="Right"
+                            Click="MinimizeMiniButton_Click">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="mbd" Background="{TemplateBinding Background}" CornerRadius="6">
+                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="mbd" Property="Background" Value="#55FFFFFF"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+                </Grid>
+
+                <!-- Identitas akun (voucher / member) -->
+                <TextBlock Text="{Binding AkunLabel}"
+                           FontSize="14" FontWeight="SemiBold"
+                           Foreground="#FFFFFF"
+                           HorizontalAlignment="Center"
+                           TextTrimming="CharacterEllipsis"
+                           MaxWidth="276"
+                           Margin="8,2,8,2"/>
+
+                <!-- Sisa waktu -->
+                <TextBlock Text="{Binding CountdownText}"
+                           FontSize="46" FontWeight="Bold"
                            Foreground="#00D4AA"
-                           HorizontalAlignment="Center" Margin="0,0,0,2"/>
-                <TextBlock Text="{Binding CountdownText}" 
-                           FontSize="28" FontWeight="Bold" 
-                           Foreground="White"
                            FontFamily="Consolas, Courier New, monospace"
-                           HorizontalAlignment="Center"/>
+                           HorizontalAlignment="Center"
+                           Margin="8,2,8,2"/>
+
+                <ProgressBar x:Name="MiniProgressBar"
+                             Height="4"
+                             Margin="14,0,14,2"
+                             Background="#333333" BorderThickness="0"
+                             Foreground="#00D4AA"
+                             Maximum="100"
+                             Value="{Binding ProgressPercent, Mode=OneWay}"/>
+
+                <!-- Tombol STOP SESI -->
+                <Button x:Name="StopSesiButton"
+                        Content="STOP SESI"
+                        Height="38"
+                        FontSize="14" FontWeight="Bold"
+                        Background="#C62828" Foreground="#FFFFFF"
+                        BorderThickness="0"
+                        Margin="14,10,14,12"
+                        Cursor="Hand"
+                        Click="StopSesiButton_Click">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="sbd" Background="{TemplateBinding Background}" CornerRadius="8">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="sbd" Property="Background" Value="#E53935"/>
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter TargetName="sbd" Property="Background" Value="#B71C1C"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+
+                <!-- Pesan konfirmasi/status stop sesi -->
+                <TextBlock x:Name="MiniStatusText"
+                           FontSize="12" Foreground="#FFB74D"
+                           HorizontalAlignment="Center"
+                           Margin="8,0,8,10"
+                           Visibility="Collapsed"/>
             </StackPanel>
         </Border>
 
