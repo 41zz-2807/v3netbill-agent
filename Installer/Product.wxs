@@ -60,8 +60,8 @@
     </Property>
 
     <!-- ===== Uninstall protection: PIN admin (diverifikasi backend) memakai
-         custom action Type 18 (Agent.Overlay.exe --uninstall-guard) sebelum
-         RemoveFiles. Tombol Remove/Repair di Apps & Features dibiarkan aktif
+         custom action Type 18 (Agent.Overlay.exe uninstall-guard) sebelum
+         RemoveFiles. Tombol Remove/Repair di Apps &amp; Features dibiarkan aktif
          agar uninstall tetap bisa dijalankan — tapi siapa pun yang mencoba
          harus memasukkan PIN Uninstall yang diset Admin di dashboard. =====
          (ARPNOREMOVE/ARPNOREPAIR tidak lagi dipakai.) -->
@@ -169,7 +169,7 @@
     </ComponentGroup>
 
     <!-- ===== Verifikasi PIN sebelum uninstall berjalan (Type 18 exe CA).
-         MenjalankanAgent.Overlay.exe --uninstall-guard tepat sebelum RemoveFiles.
+         Menjalankan Agent.Overlay.exe uninstall-guard tepat sebelum RemoveFiles.
          Exit 0 = lanjut, non-zero = batal uninstall. Hanya uninstall murni
          (REMOVE="ALL"), TIDAK saat major upgrade (UPGRADINGPRODUCTCODE). ===== -->
     <CustomAction Id="UninstallGuardAction"
@@ -184,9 +184,8 @@
       </Custom>
     </InstallExecuteSequence>
 
-    <!-- ===== Shortcuts (start menu): TIDAK ada shortcut uninstall (hardening).
-         Agent tidak boleh di-uninstall user biasa; hanya lewat msiexec /x
-         yang dilindungi PIN (verify-pin) seperti dijelaskan di catatan akhir. ===== -->
+    <!-- ===== Shortcuts (start menu): shortcut "Uninstall v3Netbill Agent" di
+         buat untuk kemudahan; tetap melewati verifikasi PIN (custom action). ===== -->
   </Package>
 
     <!-- ===== UI: dialog config + override sequence WixUI_InstallDir ===== -->
@@ -301,7 +300,7 @@
          Uninstall TETAP tersedia (tombol Remove di Apps & Features + shortcut
          Start Menu "Uninstall v3Netbill Agent"). Namun setiap uninstall murni
          melewati custom action UninstallGuardAction (Type 18) yang menjalankan
-         Agent.Overlay.exe --uninstall-guard sebelum RemoveFiles: admin harus
+         Agent.Overlay.exe uninstall-guard sebelum RemoveFiles: admin harus
          memasukkan PIN Uninstall (diset di dashboard, diverifikasi via
          POST /api/settings/verify-pin). Salah PIN / server tak terjangkau →
          uninstall dibatalkan (Return="check"). Major upgrade TIDAK meminta PIN
