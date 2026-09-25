@@ -191,34 +191,36 @@ public class Worker : BackgroundService
         {
             try
             {
-                _pipeServer = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Message, PipeOptions.Asynchronous);
-                try
+                var pipe = SecureNamedPipe.CreateServer(pipeName, 1, out string? pipeErr);
+                if (pipe == null)
                 {
-                    // Izinkan semua user (termasuk user sesi interaktif) untuk connect ke pipe service.
-                    SecureNamedPipe.GrantEveryoneAccess(_pipeServer.SafePipeHandle, pipeName);
-                    AgentLog.Write("ACL pipe selesai diproses (server siap menerima koneksi)");
+                    AgentLog.Write($"Pipe server gagal dibuat: {pipeErr}");
+                    await Task.Delay(2000, ct);
+                    continue;
                 }
-                catch (Exception aclEx)
-                {
-                    // Jangan sampai memblokir server — tanpa ACL overlay mungkin gagal connect,
-                    // tapi server tetap harus menunggu koneksi.
-                    _logger.LogWarning(aclEx, "Gagal set ACL pada pipe — overlay mungkin tidak bisa connect");
-                    AgentLog.Write(aclEx, "Gagal set ACL pada pipe (overlay mungkin tidak bisa connect)");
-                }
+                _pipeServer = pipe;
                 _logger.LogDebug("Named pipe server waiting for connection...");
-                await _pipeServer.WaitForConnectionAsync(ct);
+                await pipe.WaitForConnectionAsync(ct);
                 _logger.LogInformation("Overlay connected via named pipe");
                 AgentLog.Write("OVERLAY TERHUBUNG via named pipe");
-                _pipeListenerTask = Task.Run(() => PipeListenerAsync(_pipeServer, ct), ct);
+                _pipeListenerTask = Task.Run(() => PipeListenerAsync(pipe, ct), ct);
                 await _pipeListenerTask;
+                AgentLog.Write("Overlay disconnect — instance pipe ditutup, siap koneksi baru");
             }
             catch (OperationCanceledException) { break; }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Named pipe error, retrying in 2s...");
                 AgentLog.Write(ex, "Named pipe server error, retry 2s");
-                await Task.Delay(2000, ct);
             }
+            finally
+            {
+                // WAJIB: dispose instance lama sebelum membuat instance baru.
+                // Kalau tidak, nama pipe tetap "All pipe instances are busy" selamanya.
+                try { _pipeServer?.Dispose(); } catch { }
+                _pipeServer = null;
+            }
+            try { if (!ct.IsCancellationRequested) await Task.Delay(2000, ct); } catch (OperationCanceledException) { break; }
         }
     }
 

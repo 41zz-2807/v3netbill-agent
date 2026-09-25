@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 using V3Netbill.Agent.Core;
@@ -7,86 +8,102 @@ using V3Netbill.Agent.Core;
 namespace V3Netbill.Agent.Service;
 
 /// <summary>
-/// Memberi ACL "Everyone" (Full Access) ke named pipe service.
-/// .NET 8 tidak lagi menyediakan overload constructor dengan PipeSecurity,
-/// jadi DACL di-set langsung via Win32:
-///   1) SetSecurityInfo pada HANDLE instance yang terbuka (SE_KERNEL_OBJECT) — cara andal.
-///   2) SetNamedSecurityInfoW pada NAMA pipe (SE_FILE_OBJECT) — untuk referensi.
+/// Membuat NamedPipeServerStream yang DACL-nya sudah berisi "Everyone" (Full Access)
+/// langsung saat pembuatan (SECURITY_ATTRIBUTES → CreateNamedPipe).
+///
+/// Mengapa tidak SetNamedSecurityInfoW di nama pipe?
+/// Karena mengubah security descriptor sebuah named pipe membuat Windows MENUTUP semua
+/// instance yang sedang ada (instance yang menunggu pun diputus), dan kalau instance
+/// lama tidak di-dispose, nama pipe macet di "All pipe instances are busy" selamanya.
+/// Pendekatan ini menghindari itu: ACL diset SEKALI di awal bersama instance dibuat.
 /// </summary>
 internal static class SecureNamedPipe
 {
-    private const int SE_KERNEL_OBJECT = 6;
-    private const int SE_FILE_OBJECT = 1;
-    private const uint DACL_SECURITY_INFORMATION = 0x00000004;
+    private const uint PIPE_ACCESS_DUPLEX = 0x00000003;
+    private const uint FILE_FLAG_OVERLAPPED = 0x40000000;
+    private const uint PIPE_TYPE_MESSAGE = 0x00000004;
+    private const uint PIPE_READMODE_MESSAGE = 0x00000002;
+    private const uint PIPE_WAIT = 0x00000000;
     private const uint SDDL_REVISION_1 = 1;
+    private const int BUFFER_SIZE = 8192;
 
-    public static void GrantEveryoneAccess(SafePipeHandle pipeHandle, string pipeName)
+    /// <summary>
+    /// Buat instance server pipe dengan DACL Everyone tanpa mematikan instance lain.
+    /// Kembalikan null + pesan error bila gagal.
+    /// </summary>
+    public static NamedPipeServerStream? CreateServer(string pipeName, int maxInstances, out string? error)
     {
+        error = null;
+        IntPtr hPipe = IntPtr.Zero;
         IntPtr pSd = IntPtr.Zero;
         try
         {
             if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
                     @"D:(A;;GA;;;WD)", SDDL_REVISION_1, out pSd, out _))
             {
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "ConvertStringSecurityDescriptorToSecurityDescriptorW gagal");
+                error = $"ConvertStringSecurityDescriptorToSecurityDescriptorW gagal: 0x{Marshal.GetLastWin32Error():X8}";
+                AgentLog.Write(error);
+                return null;
             }
 
-            if (!GetSecurityDescriptorDacl(pSd, out bool daclPresent, out IntPtr pDacl, out bool daclDefaulted))
+            var sa = new SECURITY_ATTRIBUTES
             {
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "GetSecurityDescriptorDacl gagal");
-            }
+                nLength = Marshal.SizeOf<SECURITY_ATTRIBUTES>(),
+                lpSecurityDescriptor = pSd,
+                bInheritHandle = 0,
+            };
 
-            if (!daclPresent || pDacl == IntPtr.Zero)
-            {
-                throw new Win32Exception(0, "Tidak ada DACL pada security descriptor");
-            }
-
-            // 1) Set DACL pada handle instance yang terbuka (paling andal untuk instance aktif).
-            int rHandle = SetSecurityInfo(
-                pipeHandle,
-                SE_KERNEL_OBJECT,
-                DACL_SECURITY_INFORMATION,
-                IntPtr.Zero,
-                IntPtr.Zero,
-                pDacl,
-                IntPtr.Zero);
-            if (rHandle == 0)
-            {
-                AgentLog.Write("Pipe ACL OK via handle (SE_KERNEL_OBJECT)");
-            }
-            else
-            {
-                AgentLog.Write($"Pipe ACL via handle (SE_KERNEL_OBJECT) gagal: 0x{rHandle:X8}");
-            }
-
-            // 2) Set DACL pada nama pipe (SE_FILE_OBJECT) untuk instansi berikutnya.
-            int rName = SetNamedSecurityInfoW(
+            hPipe = CreateNamedPipeW(
                 @"\\.\pipe\" + pipeName,
-                SE_FILE_OBJECT,
-                DACL_SECURITY_INFORMATION,
-                IntPtr.Zero,
-                IntPtr.Zero,
-                pDacl,
-                IntPtr.Zero);
-            if (rName == 0)
+                PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+                PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+                maxInstances,
+                BUFFER_SIZE,
+                BUFFER_SIZE,
+                0,
+                ref sa);
+
+            if (hPipe == new IntPtr(-1))
             {
-                AgentLog.Write("Pipe ACL OK via nama (SE_FILE_OBJECT)");
-            }
-            else
-            {
-                AgentLog.Write($"Pipe ACL via nama (SE_FILE_OBJECT) gagal: 0x{rName:X8}");
+                error = $"CreateNamedPipe gagal: 0x{Marshal.GetLastWin32Error():X8}";
+                AgentLog.Write(error);
+                return null;
             }
 
-            if (rHandle != 0 && rName != 0)
-            {
-                throw new Win32Exception(rHandle, "SetSecurityInfo (KernelObject) dan SetNamedSecurityInfoW (FileObject) sama-sama gagal");
-            }
+            var safeHandle = new SafePipeHandle(hPipe, ownsHandle: true);
+            hPipe = IntPtr.Zero; // kini milik safeHandle
+
+            var pipe = new NamedPipeServerStream(PipeDirection.InOut, isAsync: true, isConnected: false, safeHandle);
+            AgentLog.Write("CreateNamedPipe OK — pipe dibuat DENGAN ACL Everyone saat pembuatan");
+            return pipe;
         }
         finally
         {
+            if (hPipe != IntPtr.Zero) CloseHandle(hPipe);
             if (pSd != IntPtr.Zero) LocalFree(pSd);
         }
     }
+
+    // ===== Win32 =====
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SECURITY_ATTRIBUTES
+    {
+        public int nLength;
+        public IntPtr lpSecurityDescriptor;
+        public int bInheritHandle;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern IntPtr CreateNamedPipeW(
+        string lpName,
+        uint dwOpenMode,
+        uint dwPipeMode,
+        int nMaxInstances,
+        int nOutBufferSize,
+        int nInBufferSize,
+        int nDefaultTimeOut,
+        ref SECURITY_ATTRIBUTES lpSecurityAttributes);
 
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -96,33 +113,9 @@ internal static class SecureNamedPipe
         out IntPtr securityDescriptor,
         out uint securityDescriptorSize);
 
-    [DllImport("advapi32.dll", SetLastError = true)]
+    [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetSecurityDescriptorDacl(
-        IntPtr securityDescriptor,
-        out bool lpbDaclPresent,
-        out IntPtr pDacl,
-        out bool lpbDaclDefaulted);
-
-    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    private static extern int SetNamedSecurityInfoW(
-        string pObjectName,
-        int objectType,
-        uint securityInfo,
-        IntPtr psidOwner,
-        IntPtr psidGroup,
-        IntPtr pDacl,
-        IntPtr pSacl);
-
-    [DllImport("advapi32.dll", SetLastError = true)]
-    private static extern int SetSecurityInfo(
-        SafeHandle pHandle,
-        int objectType,
-        uint securityInfo,
-        IntPtr psidOwner,
-        IntPtr psidGroup,
-        IntPtr pDacl,
-        IntPtr pSacl);
+    private static extern bool CloseHandle(IntPtr hObject);
 
     [DllImport("kernel32.dll")]
     private static extern IntPtr LocalFree(IntPtr hMem);
