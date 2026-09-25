@@ -264,6 +264,10 @@ public partial class MainWindow : Window
             {
                 case PipeMessageType.StateUpdate:
                     _stateProxy.ApplyStateUpdate(msg.Payload);
+                    // Refresh eksplisit setelah state penuh ter-set (independen dari
+                    // PropertyChanged Locked) — jamin mini-window muncul tepat waktu.
+                    UpdateVisibility();
+                    UpdateWindowState();
                     break;
                 case PipeMessageType.SessionTick:
                     _stateProxy.ApplySessionTick(msg.Payload);

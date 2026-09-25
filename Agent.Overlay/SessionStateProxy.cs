@@ -152,10 +152,14 @@ public class SessionStateProxy : INotifyPropertyChanged
             var data = JsonConvert.DeserializeObject<StateUpdatePayload>(json);
             if (data == null) return;
 
-            Locked = data.Locked;
+            // URUTAN PENTING: set SisaDetik/DurasiDetik DULU, baru Locked.
+            // Setter Locked memicu UpdateVisibility/UpdateWindowState di MainWindow
+            // secara SINKRON (kita sudah dalam Dispatcher.Invoke). Kalau SisaDetik
+            // belum di-set, mini-window sesi tidak pernah tampil (race).
             SessionId = data.SessionId;
             DurasiDetik = data.DurasiDetik;
             SisaDetik = data.SisaDetik;
+            Locked = data.Locked;
 
             _logger.LogDebug("State updated: Locked={Locked}, SessionId={SessionId}, Sisa={Sisa}", Locked, SessionId, SisaDetik);
         }
