@@ -58,6 +58,8 @@ public class Worker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        AgentLog.FileName = "agent.log";
+        AgentLog.Write("=== v3Netbill Agent Service starting ===");
         _logger.LogInformation("v3Netbill Agent Service starting...");
 
         // Mode: PC terkunci saat idle (tanpa sesi). Mulai dengan blokir Task Manager.
@@ -67,6 +69,7 @@ public class Worker : BackgroundService
         var pcId = GetConfig("Agent:PcId", "PcId", "PC001");
         var agentToken = GetConfig("Agent:Token", "AgentToken", "CHANGE_ME");
         _overlayExePath = _configuration["Overlay:ExePath"] ?? Path.Combine(AppContext.BaseDirectory, "..", "Agent.Overlay", "Agent.Overlay.exe");
+        AgentLog.Write($"Config: serverUrl={serverUrl}, pcId={pcId}, overlayExe={_overlayExePath}");
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         _serverConnection = new ServerConnection(serverUrl, pcId, agentToken, _logger);
@@ -81,11 +84,13 @@ public class Worker : BackgroundService
         {
             await _serverConnection.ConnectAsync(_cts.Token);
             _logger.LogInformation("Agent connected & registered: {PcId}", pcId);
+            AgentLog.Write($"Connected & registered ke backend: pcId={pcId}");
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to connect agent");
+            AgentLog.Write(ex, "Gagal connect ke backend");
         }
 
         // Start named pipe server
@@ -188,16 +193,19 @@ public class Worker : BackgroundService
                 {
                     // Izinkan semua user (termasuk user sesi interaktif) untuk connect ke pipe service.
                     SecureNamedPipe.GrantEveryoneAccess(pipeName);
+                    AgentLog.Write("Pipe ACL Everyone di-set (siap menerima koneksi)");
                 }
                 catch (Exception aclEx)
                 {
                     // Jangan sampai memblokir server — tanpa ACL overlay mungkin gagal connect,
                     // tapi server tetap harus menunggu koneksi.
                     _logger.LogWarning(aclEx, "Gagal set ACL pada pipe — overlay mungkin tidak bisa connect");
+                    AgentLog.Write(aclEx, "Gagal set ACL pada pipe (overlay mungkin tidak bisa connect)");
                 }
                 _logger.LogDebug("Named pipe server waiting for connection...");
                 await _pipeServer.WaitForConnectionAsync(ct);
                 _logger.LogInformation("Overlay connected via named pipe");
+                AgentLog.Write("OVERLAY TERHUBUNG via named pipe");
                 _pipeListenerTask = Task.Run(() => PipeListenerAsync(_pipeServer, ct), ct);
                 await _pipeListenerTask;
             }
@@ -205,6 +213,7 @@ public class Worker : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Named pipe error, retrying in 2s...");
+                AgentLog.Write(ex, "Named pipe server error, retry 2s");
                 await Task.Delay(2000, ct);
             }
         }
@@ -243,6 +252,7 @@ public class Worker : BackgroundService
             case PipeMessageType.LoginRequest:
                 {
                     var req = JsonConvert.DeserializeObject<LoginRequestPayload>(msg.Payload);
+                    AgentLog.Write($"Terima login_request dari overlay: kode='{req?.Kode}'");
                     if (req != null && _serverConnection != null)
                     {
                         await _serverConnection.SendLoginRequestAsync(req.Kode, req.Password, ct);
@@ -329,6 +339,7 @@ public class Worker : BackgroundService
             if (processes.Length == 0)
             {
                 _logger.LogWarning("Agent.Overlay not running during locked session — restarting...");
+                AgentLog.Write("Watchdog: Agent.Overlay tidak jalan dalam keadaan Locked — coba luncurkan");
                 RestartOverlay();
             }
             foreach (var p in processes) p.Dispose();
@@ -336,6 +347,7 @@ public class Worker : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Watchdog error");
+            AgentLog.Write(ex, "Watchdog error");
         }
     }
 
@@ -347,15 +359,18 @@ public class Worker : BackgroundService
             if (InteractiveProcess.Launch(_overlayExePath, workingDir))
             {
                 _logger.LogInformation("Agent.Overlay restarted (interactive session)");
+                AgentLog.Write("Agent.Overlay diluncurkan OK (sesi interaktif)");
             }
             else
             {
                 _logger.LogInformation("Agent.Overlay tidak diluncurkan (belum ada sesi interaktif aktif)");
+                AgentLog.Write("Agent.Overlay TIDAK diluncurkan (belum ada sesi interaktif / token gagal)");
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to restart Agent.Overlay");
+            AgentLog.Write(ex, "Gagal restart Agent.Overlay");
         }
     }
 

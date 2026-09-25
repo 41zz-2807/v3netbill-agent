@@ -128,6 +128,7 @@ public partial class MainWindow : Window
             {
                 OverlayBackground.Background = new ImageBrush(bitmap) { Stretch = Stretch.UniformToFill };
             });
+            AgentLog.Write($"Wallpaper diterapkan ({bytes.Length} bytes)");
             _logger.LogInformation("Wallpaper diterapkan ({N} bytes)", bytes.Length);
         }
         catch (Exception ex)
@@ -291,11 +292,13 @@ public partial class MainWindow : Window
             {
                 ErrorText.Visibility = Visibility.Collapsed;
                 // State will update via SessionStarted from Service
+                AgentLog.Write("LoginResult: SUKSES dari service");
             }
             else
             {
                 ErrorText.Text = result.Alasan ?? "Login gagal";
                 ErrorText.Visibility = Visibility.Visible;
+                AgentLog.Write($"LoginResult: GAGAL — {result.Alasan}");
             }
         }
         catch (Exception ex)
@@ -368,10 +371,12 @@ public partial class MainWindow : Window
         {
             ErrorText.Text = "Belum tersambung ke service — tunggu beberapa saat lalu coba lagi";
             ErrorText.Visibility = Visibility.Visible;
+            AgentLog.Write($"Login dicegah: pipe belum terhubung (IsConnected=false) kode='{kode}'");
             _logger.LogWarning("Login dicegah: pipe ke service belum terhubung");
             return;
         }
 
+        AgentLog.Write($"Kirim login_request ke service: kode='{kode}'");
         await _pipeClient.SendLoginRequestAsync(kode, password);
     }
 

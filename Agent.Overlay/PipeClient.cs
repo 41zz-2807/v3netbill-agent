@@ -42,8 +42,10 @@ public class PipeClient : IDisposable
             {
                 _pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
                 _logger.LogInformation("Connecting to Service via named pipe...");
+                AgentLog.Write("Pipe: mencoba connect ke service...");
                 await _pipe.ConnectAsync(5000, ct);
                 _logger.LogInformation("Connected to Service");
+                AgentLog.Write("Pipe: TERHUBUNG ke service");
 
                 // Minta state terkini setelah (re)connect agar overlay sinkron
                 await RequestStateAsync(ct);
@@ -52,11 +54,13 @@ public class PipeClient : IDisposable
                 _readerTask = Task.Run(() => ReadLoopAsync(_cts.Token), _cts.Token);
                 await _readerTask;
                 _logger.LogWarning("Pipa terputus — mencoba menyambungkan ulang...");
+                AgentLog.Write("Pipe: putus — mencoba ulang");
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Pipe connection failed, retrying in 2s...");
+                AgentLog.Write(ex, "Pipe connect GAGAL (retry 2s)");
             }
             finally
             {

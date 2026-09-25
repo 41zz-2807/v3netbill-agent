@@ -1,6 +1,7 @@
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using V3Netbill.Agent.Core;
 
 namespace V3Netbill.Agent.Service;
 
@@ -15,10 +16,16 @@ internal static class InteractiveProcess
     public static bool Launch(string exePath, string workingDir)
     {
         uint sessionId = WTSGetActiveConsoleSessionId();
-        if (sessionId == 0xFFFFFFFF) return false;
+        if (sessionId == 0xFFFFFFFF)
+        {
+            AgentLog.Write($"Launch overlay: WTSGetActiveConsoleSessionId = 0xFFFFFFFF (tidak ada sesi konsol aktif)");
+            return false;
+        }
 
         if (!WTSQueryUserToken(sessionId, out IntPtr userToken) || userToken == IntPtr.Zero)
         {
+            int err = Marshal.GetLastWin32Error();
+            AgentLog.Write($"Launch overlay: WTSQueryUserToken gagal session={sessionId} err=0x{err:X8} ({new Win32Exception(err).Message})");
             return false;
         }
 
@@ -26,7 +33,9 @@ internal static class InteractiveProcess
         if (!DuplicateTokenEx(userToken, TOKEN_ASSIGN_PRIMARY | TOKEN_DUPLICATE | TOKEN_QUERY, IntPtr.Zero,
                 SECURITY_IMPERSONATION, TokenPrimary, out primaryToken) || primaryToken == IntPtr.Zero)
         {
+            int err = Marshal.GetLastWin32Error();
             CloseHandle(userToken);
+            AgentLog.Write($"Launch overlay: DuplicateTokenEx gagal err=0x{err:X8}");
             return false;
         }
 
@@ -51,9 +60,11 @@ internal static class InteractiveProcess
             if (!ok)
             {
                 int error = Marshal.GetLastWin32Error();
+                AgentLog.Write($"Launch overlay: CreateProcessAsUser gagal exe=\"{exePath}\" err=0x{error:X8} ({new Win32Exception(error).Message})");
                 throw new Win32Exception(error, "CreateProcessAsUser gagal");
             }
 
+            AgentLog.Write($"Launch overlay: CreateProcessAsUser OK pid={pi.dwProcessId}");
             CloseHandle(pi.hProcess);
             CloseHandle(pi.hThread);
             return true;

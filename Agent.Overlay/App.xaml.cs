@@ -4,6 +4,7 @@ using System.Windows;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using V3Netbill.Agent.Core;
 
 namespace V3Netbill.Agent.Overlay;
 
@@ -18,6 +19,8 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        AgentLog.FileName = "overlay.log";
+        AgentLog.Write("=== Agent Overlay starting ===");
 
         // Mode maintenance: flag stop ada → jangan jalankan overlay.
         string stopFlag = Path.Combine(
@@ -25,6 +28,7 @@ public partial class App : Application
             "v3netbill-agent-stop.flag");
         if (File.Exists(stopFlag))
         {
+            AgentLog.Write($"Stop flag '{stopFlag}' ada — overlay keluar (mode maintenance)");
             Shutdown();
             return;
         }
@@ -35,9 +39,11 @@ public partial class App : Application
         if (!createdNew)
         {
             // Instance lain sudah jalan — keluar diam-diam.
+            AgentLog.Write("Instance overlay lain sudah jalan — keluar");
             Shutdown();
             return;
         }
+        AgentLog.Write("Mutex utama didapat, lanjut Host + MainWindow.");
 
         _host = Host.CreateDefaultBuilder()
             .ConfigureAppConfiguration(c =>
