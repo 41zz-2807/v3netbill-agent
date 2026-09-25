@@ -73,3 +73,17 @@ public sealed class SessionStopPayload
     [JsonPropertyName("alasan")]
     public string Alasan { get; set; } = string.Empty;
 }
+
+/// <summary>Event <c>admin:lock</c> — dashboard memerintahkan kunci layar PC ini sekarang juga.</summary>
+public sealed class AdminLockPayload
+{
+    [JsonPropertyName("pcId")]
+    public string PcId { get; set; } = string.Empty;
+}
+
+/// <summary>Event <c>admin:shutdown</c> — dashboard memerintahkan matikan PC (setelah sesi dihentikan).</summary>
+public sealed class AdminShutdownPayload
+{
+    [JsonPropertyName("pcId")]
+    public string PcId { get; set; } = string.Empty;
+}

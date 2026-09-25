@@ -50,6 +50,9 @@ public class Worker : BackgroundService
     private SessionState _currentState = new() { State = SessionState.LockState.Locked };
     private string _overlayExePath = string.Empty;
     private readonly object _stateLock = new();
+    // NamedPipeServerStream TIDAK thread-safe untuk write bersamaan:
+    // dua WriteAsync pada instance sama tanpa sinkronisasi dapat korup/gagal.
+    private readonly SemaphoreSlim _pipeWriteLock = new(1, 1);
 
     public Worker(ILogger<Worker> logger, IConfiguration configuration)
     {
@@ -83,6 +86,8 @@ public class Worker : BackgroundService
         _serverConnection.SessionStarted += OnSessionStarted;
         _serverConnection.SessionTicked += OnSessionTicked;
         _serverConnection.SessionStopped += OnSessionStopped;
+        _serverConnection.AdminLockReceived += OnAdminLock;
+        _serverConnection.AdminShutdownReceived += OnAdminShutdown;
 
         try
         {
@@ -126,7 +131,7 @@ public class Worker : BackgroundService
         _ = SendToOverlayAsync(new PipeMessage(PipeMessageType.LoginResult, JsonConvert.SerializeObject(payload)));
     }
 
-    private void OnSessionStarted(object? sender, SessionStartEventArgs e)
+    private async void OnSessionStarted(object? sender, SessionStartEventArgs e)
     {
         lock (_stateLock)
         {
@@ -136,12 +141,19 @@ public class Worker : BackgroundService
             _currentState.State = SessionState.LockState.Unlocked;
         }
         SetTaskManagerBlocked(false);
-        _ = SendStateUpdateAsync();
+        // StateUpdate (locked=false) HARUS dikirim & tiba dulu, baru identitas akun.
+        // Sequential + semaphore = tidak pernah korup/tertukar.
+        var stateSent = await SendStateUpdateAsync();
+        if (stateSent && _currentState.State != SessionState.LockState.Unlocked)
+        {
+            // Aman: kalau sudah berubah (mis. stop tiba-tiba), jangan kirim akun.
+            return;
+        }
         // Kirim identitas akun ke overlay (untuk window mini: "login sebagai siapa").
         var akun = e.Payload.Account;
         if (akun != null)
         {
-            _ = SendToOverlayAsync(new PipeMessage(PipeMessageType.SessionStarted, JsonConvert.SerializeObject(new
+            await SendToOverlayAsync(new PipeMessage(PipeMessageType.SessionStarted, JsonConvert.SerializeObject(new
             {
                 kodeUnik = akun.KodeUnik,
                 nama = akun.Nama,
@@ -160,7 +172,7 @@ public class Worker : BackgroundService
         _ = SendToOverlayAsync(new PipeMessage(PipeMessageType.SessionTick, JsonConvert.SerializeObject(new { sisaDetik = e.Payload.SisaDetik })));
     }
 
-    private void OnSessionStopped(object? sender, SessionStopEventArgs e)
+    private async void OnSessionStopped(object? sender, SessionStopEventArgs e)
     {
         lock (_stateLock)
         {
@@ -170,11 +182,54 @@ public class Worker : BackgroundService
             _currentState.SisaDetik = 0;
         }
         SetTaskManagerBlocked(true);
-        _ = SendStateUpdateAsync();
-        _ = SendToOverlayAsync(new PipeMessage(PipeMessageType.SessionStopped, JsonConvert.SerializeObject(new { alasan = e.Payload.Alasan })));
+        // Sequential: StateUpdate (locked=true) dulu, baru pesan alasan.
+        await SendStateUpdateAsync();
+        await SendToOverlayAsync(new PipeMessage(PipeMessageType.SessionStopped, JsonConvert.SerializeObject(new { alasan = e.Payload.Alasan })));
     }
 
-    private async Task SendStateUpdateAsync()
+    /// <summary>Dashboard/backend memerintahkan kunci layar PC sekarang (di luar alur sesi).</summary>
+    private async void OnAdminLock(object? sender, AdminLockEventArgs e)
+    {
+        AgentLog.Write($"ADMIN-LOCK diterima untuk PC {e.Payload.PcId}");
+        await ForceLockScreenAsync();
+    }
+
+    /// <summary>Dashboard/backend memerintahkan matikan PC; hentikan sesi aktif dulu, lalu shutdown.</summary>
+    private async void OnAdminShutdown(object? sender, AdminShutdownEventArgs e)
+    {
+        AgentLog.Write($"ADMIN-SHUTDOWN diterima untuk PC {e.Payload.PcId} — stop sesi lalu matikan PC");
+        try
+        {
+            if (_serverConnection != null)
+            {
+                await _serverConnection.SendStopSessionAsync(_cts?.Token ?? CancellationToken.None);
+            }
+            await ForceLockScreenAsync();
+            // Beri waktu 30 detik sebelum mati agar sesi/refund selesai di backend.
+            Process.Start(new ProcessStartInfo("shutdown", "/s /t 30 /c \"v3Netbill: PC dimatikan oleh admin\""));
+            AgentLog.Write("Shutdown terjadwal (30 detik) — PC dimatikan admin");
+        }
+        catch (Exception ex)
+        {
+            AgentLog.Write(ex, "Gagal menjalankan perintah shutdown");
+        }
+    }
+
+    private async Task ForceLockScreenAsync()
+    {
+        lock (_stateLock)
+        {
+            _currentState.State = SessionState.LockState.Locked;
+            _currentState.SessionId = null;
+            _currentState.DurasiDetik = 0;
+            _currentState.SisaDetik = 0;
+        }
+        SetTaskManagerBlocked(true);
+        await SendStateUpdateAsync();
+        await SendToOverlayAsync(new PipeMessage(PipeMessageType.SessionStopped, JsonConvert.SerializeObject(new { alasan = "manual" })));
+    }
+
+    private async Task<bool> SendStateUpdateAsync()
     {
         SessionState snapshot;
         lock (_stateLock)
@@ -195,6 +250,7 @@ public class Worker : BackgroundService
             sisaDetik = snapshot.SisaDetik
         });
         await SendToOverlayAsync(new PipeMessage(PipeMessageType.StateUpdate, payload));
+        return snapshot.State == SessionState.LockState.Unlocked;
     }
 
     private async Task StartPipeServerAsync(CancellationToken ct)
@@ -332,17 +388,23 @@ public class Worker : BackgroundService
 
     private async Task SendToOverlayAsync(PipeMessage msg, CancellationToken ct = default)
     {
-        if (_pipeServer == null || !_pipeServer.IsConnected) return;
+        var pipe = _pipeServer;
+        if (pipe == null || !pipe.IsConnected) return;
+        await _pipeWriteLock.WaitAsync(ct);
         try
         {
             string json = JsonConvert.SerializeObject(msg);
             byte[] data = Encoding.UTF8.GetBytes(json);
-            await _pipeServer.WriteAsync(data, ct);
-            await _pipeServer.FlushAsync(ct);
+            await pipe.WriteAsync(data, ct);
+            await pipe.FlushAsync(ct);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to send to overlay");
+        }
+        finally
+        {
+            _pipeWriteLock.Release();
         }
     }
 

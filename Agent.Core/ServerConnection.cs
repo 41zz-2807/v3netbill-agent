@@ -52,6 +52,12 @@ public sealed class ServerConnection : IAsyncDisposable
     /// <summary>Event: server kirim <c>session:stop</c> (sesi berhenti).</summary>
     public event EventHandler<SessionStopEventArgs>? SessionStopped;
 
+    /// <summary>Event: dashboard kirim <c>admin:lock</c> (perintah kunci layar).</summary>
+    public event EventHandler<AdminLockEventArgs>? AdminLockReceived;
+
+    /// <summary>Event: dashboard kirim <c>admin:shutdown</c> (perintah matikan PC).</summary>
+    public event EventHandler<AdminShutdownEventArgs>? AdminShutdownReceived;
+
     public bool IsConnected => _client.Connected;
 
     /// <summary>Buat koneksi baru. Belum connect sampai <see cref="ConnectAsync"/> dipanggil.</summary>
@@ -114,6 +120,20 @@ public sealed class ServerConnection : IAsyncDisposable
         {
             var payload = ctx.GetValue<SessionStopPayload>(0);
             SessionStopped?.Invoke(this, new SessionStopEventArgs(payload));
+            return Task.CompletedTask;
+        });
+
+        _client.On("admin:lock", ctx =>
+        {
+            var payload = ctx.GetValue<AdminLockPayload>(0);
+            AdminLockReceived?.Invoke(this, new AdminLockEventArgs(payload));
+            return Task.CompletedTask;
+        });
+
+        _client.On("admin:shutdown", ctx =>
+        {
+            var payload = ctx.GetValue<AdminShutdownPayload>(0);
+            AdminShutdownReceived?.Invoke(this, new AdminShutdownEventArgs(payload));
             return Task.CompletedTask;
         });
     }
@@ -231,4 +251,16 @@ public sealed class SessionStopEventArgs : EventArgs
 {
     public SessionStopEventArgs(SessionStopPayload payload) => Payload = payload;
     public SessionStopPayload Payload { get; }
+}
+
+public sealed class AdminLockEventArgs : EventArgs
+{
+    public AdminLockEventArgs(AdminLockPayload payload) => Payload = payload;
+    public AdminLockPayload Payload { get; }
+}
+
+public sealed class AdminShutdownEventArgs : EventArgs
+{
+    public AdminShutdownEventArgs(AdminShutdownPayload payload) => Payload = payload;
+    public AdminShutdownPayload Payload { get; }
 }

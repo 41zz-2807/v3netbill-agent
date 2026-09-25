@@ -284,7 +284,7 @@ public partial class MainWindow : Window
         });
     }
 
-    private void HandleLoginResult(string json)
+    private async void HandleLoginResult(string json)
     {
         try
         {
@@ -294,8 +294,10 @@ public partial class MainWindow : Window
             if (result.Sukses)
             {
                 ErrorText.Visibility = Visibility.Collapsed;
-                // State will update via SessionStarted from Service
                 AgentLog.Write("LoginResult: SUKSES dari service");
+                // Jaring pengaman: minta state terkini agar window mini pasti muncul
+                // meski ada StateUpdate yang sempat gagal/tertukar.
+                await _pipeClient.RequestStateAsync();
             }
             else
             {
