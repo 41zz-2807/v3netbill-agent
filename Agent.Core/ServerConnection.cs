@@ -38,6 +38,7 @@ public sealed class ServerConnection : IAsyncDisposable
     private readonly CancellationTokenSource _lifetimeCts = new();
     private Timer? _heartbeatTimer;
     private readonly object _heartbeatLock = new();
+    private DateTime _lastWarnNotConnected = DateTime.MinValue;
     private bool _registered;
     private bool _disposed;
 
@@ -182,9 +183,30 @@ public sealed class ServerConnection : IAsyncDisposable
     /// <summary>Kirim <c>agent:heartbeat</c> manual (dipakai bila mau dipicu selain timer).</summary>
     public async Task SendHeartbeatAsync(CancellationToken ct = default)
     {
-        if (!_client.Connected) return;
-        await _client.EmitAsync("agent:heartbeat", [ new { pcId = _pcId } ], ct);
-        _logger.LogDebug("agent:heartbeat → PC {PcId}", _pcId);
+        if (!_client.Connected)
+        {
+            // Jangan senyap: dulu baris ini return tanpa log apa pun sehingga heartbeat
+            // bisa mati tanpa jejak sementara socket masih ada di sisi server.
+            if ((DateTime.UtcNow - _lastWarnNotConnected).TotalSeconds >= 60)
+            {
+                _lastWarnNotConnected = DateTime.UtcNow;
+                _logger.LogWarning("Heartbeat dilewati: socket lokal dianggap tidak terhubung");
+                AgentLog.Write("Heartbeat dilewati: socket lokal dianggap tidak terhubung");
+            }
+            return;
+        }
+        try
+        {
+            await _client.EmitAsync("agent:heartbeat", [ new { pcId = _pcId } ], ct);
+            _logger.LogDebug("agent:heartbeat → PC {PcId}", _pcId);
+        }
+        catch (Exception ex)
+        {
+            // Tanpa catch ini, exception dilempar dari dalam async void TimerCallback
+            // dan hilang tanpa trace.
+            _logger.LogError(ex, "Gagal mengirim agent:heartbeat untuk PC {PcId}", _pcId);
+            AgentLog.Write(ex, "Gagal kirim agent:heartbeat");
+        }
     }
 
     /// <summary>Client (overlay) minta login voucher/member ke server.</summary>
@@ -213,13 +235,29 @@ public sealed class ServerConnection : IAsyncDisposable
             // Selalu buat timer baru, jangan ??=: StartHeartbeat dipanggil ulang dari
             // supervisor setiap reconnect, sementara timer sebelumnya masih non-null.
             _heartbeatTimer?.Dispose();
+            // PANGGIL sinkron yang membungkus try/catch — bukan `async _ => ...`.
+            // TimerCallback bertipe void, jadi lambda async jadi async void dan
+            // setiap exception di dalamnya hilang tanpa trace.
             _heartbeatTimer = new Timer(
-                async _ => await SendHeartbeatAsync(_lifetimeCts.Token),
+                _ => HeartbeatTick(),
                 null,
                 TimeSpan.FromSeconds(HEARTBEAT_INTERVAL_DETIK),
                 TimeSpan.FromSeconds(HEARTBEAT_INTERVAL_DETIK));
         }
         _logger.LogInformation("Heartbeat aktif: tiap {Interval}s", HEARTBEAT_INTERVAL_DETIK);
+    }
+
+    private void HeartbeatTick()
+    {
+        try
+        {
+            SendHeartbeatAsync(_lifetimeCts.Token).GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Heartbeat tick gagal untuk PC {PcId}", _pcId);
+            AgentLog.Write(ex, "Heartbeat tick gagal");
+        }
     }
 
     /// <summary>
