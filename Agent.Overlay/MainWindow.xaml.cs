@@ -101,7 +101,7 @@ public partial class MainWindow : Window
 
     private string GetServerUrl()
     {
-        var url = "https://v3netbill.<domain>";
+        var url = "http://localhost:3000";
         try
         {
             using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\v3Netbill\Agent");

@@ -51,7 +51,7 @@
     </Feature>
 
     <!-- ===== Properties (input pengguna) ===== -->
-    <Property Id="SERVER_URL" Value="https://v3netbill.<domain>" />
+    <Property Id="SERVER_URL" Value="http://localhost:3000" />
     <Property Id="PC_ID" Value="PC001">
       <RegistrySearch Id="PrefillPcId" Root="HKLM" Key="Software\v3Netbill\Agent" Name="PcId" Type="raw" />
     </Property>
