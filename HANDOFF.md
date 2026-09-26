@@ -41,8 +41,9 @@ Registry: `HKLM\Software\v3Netbill\Agent` (dan `WOW6432Node` untuk installer 32-
    `Installer/uninstall-old-agent.bat` bila service masih jalan).
 2. Download MSI dari GitHub Actions run terbaru (repo agent).
 3. Jalankan MSI → isi dialog **Konfigurasi Server**:
-   - **Server URL** — `https://v3netbill.<domain>` (PC di luar jaringan) atau
+   - **Server URL** — domain publik untuk PC di luar jaringan, atau
      `http://192.168.1.65:3000` (PC satu jaringan LAN dengan server). **Harus ada skema.**
+     Nilai domain publik tidak disimpan di dokumen ini — ambil dari dashboard PC.
    - **PC ID** — UUID dari dashboard.
    - **Agent Token** — token dari dashboard.
 4. Verifikasi `C:\Program Files\v3NetbillAgent` (64-bit, bukan `(x86)`).
