@@ -39,6 +39,7 @@ public sealed class ServerConnection : IAsyncDisposable
     private Timer? _heartbeatTimer;
     private readonly object _heartbeatLock = new();
     private DateTime _lastWarnNotConnected = DateTime.MinValue;
+    private int _heartbeatTickCount;
     private bool _registered;
     private bool _disposed;
 
@@ -158,6 +159,9 @@ public sealed class ServerConnection : IAsyncDisposable
         // tidak boleh — reconnect dikelola satu otoritas oleh supervisor di
         // Agent.Service.Worker (MaintainConnectionAsync, polling tiap 5 detik).
         _logger.LogWarning("Terputus dari server: {Reason} — supervisor akan mencoba connect ulang.", reason);
+        // Wajib ke AgentLog juga: kalau hanya _logger, alasannya hanya ada di Windows
+        // Event Log sehingga tidak pernah terlihat saat membaca agent.log.
+        AgentLog.Write($"Terputus dari server: {reason} — supervisor akan mencoba connect ulang");
         StopHeartbeat();
         _registered = false; // izinkan register ulang saat reconnect berikutnya
     }
@@ -251,6 +255,12 @@ public sealed class ServerConnection : IAsyncDisposable
     {
         try
         {
+            _heartbeatTickCount++;
+            // Log tiap tick: satu-satunya cara memastikan apakah timer benar-benar
+            // menembak. Tanpa ini, "tidak ada heartbeat di DB" tidak bisa
+            // dibedakan dari "timer mati" vs "guard Connected men-trip" vs
+            // "EmitAsync melempar".
+            AgentLog.Write($"Heartbeat tick #{_heartbeatTickCount} (connected={_client.Connected})");
             SendHeartbeatAsync(_lifetimeCts.Token).GetAwaiter().GetResult();
         }
         catch (Exception ex)
