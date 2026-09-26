@@ -58,6 +58,16 @@ public class Worker : BackgroundService
     /// <summary>Jeda antar percobaan connect ulang ke backend.</summary>
     private const int RECONNECT_INTERVAL_DETIK = 5;
 
+    /// <summary>
+    /// Batas waktu satu percobaan connect. WAJIB ada: SocketIOClient.ConnectAsync()
+    /// tidak menerima CancellationToken, jadi dengan Reconnection=true satu panggilan
+    /// bisa memblokir totalTimeout = ConnectionTimeout x ReconnectionAttempts
+    /// (30s x 30 = 15 menit) dan supervisor ikut macet. Dengan Reconnection=false
+    /// (lihat ServerConnection) satu attempt selesai dalam ~30s, jadi 45 detik
+    /// hanya jaring pengaman.
+    /// </summary>
+    private const int RECONNECT_TIMEOUT_DETIK = 45;
+
     public Worker(ILogger<Worker> logger, IConfiguration configuration)
     {
         _logger = logger;
@@ -156,13 +166,23 @@ public class Worker : BackgroundService
 
                 try
                 {
-                    await _serverConnection.ConnectAsync(ct);
+                    // WaitAsync(timeSpan) membuka await-if ini kalau ConnectAsync()
+                    // menggantung, supaya supervisor tidak pernah macet.
+                    await _serverConnection
+                        .ConnectAsync(ct)
+                        .WaitAsync(TimeSpan.FromSeconds(RECONNECT_TIMEOUT_DETIK));
                     _logger.LogInformation("Agent connected & registered: {PcId}", pcId);
                     AgentLog.Write($"Connected & registered ke backend: pcId={pcId}");
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
                     break;
+                }
+                catch (TimeoutException)
+                {
+                    _logger.LogError("Percobaan connect ke backend menggantung > {Detik} detik — dicoba lagi",
+                        RECONNECT_TIMEOUT_DETIK);
+                    AgentLog.Write($"Connect ke backend menggantung > {RECONNECT_TIMEOUT_DETIK} detik");
                 }
                 catch (Exception ex)
                 {

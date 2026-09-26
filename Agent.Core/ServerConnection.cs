@@ -73,9 +73,15 @@ public sealed class ServerConnection : IAsyncDisposable
         {
             // polling dulu, upgrade otomatis ke WebSocket (sesuai Socket.IO v4 / EIO=4)
             EIO = EngineIO.V4,
-            Reconnection = true,
-            ReconnectionAttempts = 30,
-            ReconnectionDelayMax = 5000,
+            // PENTING: reconnection library DIMATIKAN. SocketIOClient 4.x memang
+            // auto-reconnect pada disconnect (SocketIO.InvokeOnDisconnected), tetapi
+            // hanya ReconnectionAttempts=30 x delay acak <= ReconnectionDelayMax —
+            // budget ~2 menit, lalu menyerah PERMANEN tanpa ada callback lagi.
+            // Kalau menyalakan Reconnection bersama supervisor di Agent.Service.Worker,
+            // keduanya memanggil ConnectAsync() bersamaan pada satu instance SocketIO
+            // -> dua session hidup -> server saling menendang socket -> connection
+            // flapping. Jadi biarkan supervisor satu-satunya yang memicu reconnect.
+            Reconnection = false,
             ConnectionTimeout = TimeSpan.FromSeconds(30),
             AutoUpgrade = true,
             Query = new System.Collections.Specialized.NameValueCollection
@@ -146,8 +152,9 @@ public sealed class ServerConnection : IAsyncDisposable
 
     private void OnDisconnected(object? sender, string reason)
     {
-        // CATATAN: SocketIOClient 4.x TIDAK reconnect otomatis di sini. Yang managing
-        // connect ulang adalah supervisor di Agent.Service.Worker (MaintainConnectionAsync).
+        // CATATAN: library (Reconnection=false) TIDAK reconnect di sini, dan memang
+        // tidak boleh — reconnect dikelola satu otoritas oleh supervisor di
+        // Agent.Service.Worker (MaintainConnectionAsync, polling tiap 5 detik).
         _logger.LogWarning("Terputus dari server: {Reason} — supervisor akan mencoba connect ulang.", reason);
         StopHeartbeat();
         _registered = false; // izinkan register ulang saat reconnect berikutnya
