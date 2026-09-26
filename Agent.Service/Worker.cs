@@ -47,12 +47,16 @@ public class Worker : BackgroundService
     private NamedPipeServerStream? _pipeServer;
     private Task? _pipeListenerTask;
     private Timer? _watchdogTimer;
+    private Task? _maintainTask;
     private SessionState _currentState = new() { State = SessionState.LockState.Locked };
     private string _overlayExePath = string.Empty;
     private readonly object _stateLock = new();
     // NamedPipeServerStream TIDAK thread-safe untuk write bersamaan:
     // dua WriteAsync pada instance sama tanpa sinkronisasi dapat korup/gagal.
     private readonly SemaphoreSlim _pipeWriteLock = new(1, 1);
+
+    /// <summary>Jeda antar percobaan connect ulang ke backend.</summary>
+    private const int RECONNECT_INTERVAL_DETIK = 5;
 
     public Worker(ILogger<Worker> logger, IConfiguration configuration)
     {
@@ -93,18 +97,12 @@ public class Worker : BackgroundService
         _serverConnection.AdminLockReceived += OnAdminLock;
         _serverConnection.AdminShutdownReceived += OnAdminShutdown;
 
-        try
-        {
-            await _serverConnection.ConnectAsync(_cts.Token);
-            _logger.LogInformation("Agent connected & registered: {PcId}", pcId);
-            AgentLog.Write($"Connected & registered ke backend: pcId={pcId}");
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to connect agent");
-            AgentLog.Write(ex, "Gagal connect ke backend");
-        }
+        // Supervisor koneksi. SocketIOClient 4.x hanya mencoba retry SELAMA
+        // ConnectAsync() masih berjalan (ReconnectionAttempts=30); begitu koneksi
+        // sukses lalu putus — mis. backend restart/deploy — TIDAK ada retry lagi
+        // dan ConnectAsync() tidak pernah dipanggil ulang. Akibatnya agent offline
+        // permanen. Loop di bawah yang menutup celah tersebut.
+        _maintainTask = MaintainConnectionAsync(pcId, _cts.Token);
 
         // Start named pipe server
         _ = StartPipeServerAsync(_cts.Token);
@@ -122,10 +120,61 @@ public class Worker : BackgroundService
         {
             _watchdogTimer?.Dispose();
             _pipeServer?.Dispose();
+            if (_maintainTask != null)
+            {
+                try { await _maintainTask.WaitAsync(TimeSpan.FromSeconds(10)); }
+                catch (Exception) { /* dibatalkan atau tidak selesai — abaikan */ }
+            }
             if (_serverConnection != null)
             {
                 await _serverConnection.DisposeAsync();
             }
+        }
+    }
+
+    /// <summary>
+    /// Jaga koneksi tetap hidup: connect pertama kali, lalu connect ulang tiap
+    /// <see cref="RECONNECT_INTERVAL_DETIK"/> selama <see cref="_serverConnection"/> tidak terhubung.
+    /// Berhenti saat service di-stop.
+    /// </summary>
+    private async Task MaintainConnectionAsync(string pcId, CancellationToken ct)
+    {
+        var first = true;
+        while (!ct.IsCancellationRequested)
+        {
+            if (_serverConnection != null && !_serverConnection.IsConnected)
+            {
+                if (first)
+                {
+                    _logger.LogInformation("Menghubungkan agent ke backend: {PcId}", pcId);
+                }
+                else
+                {
+                    _logger.LogInformation("Koneksi terputus — mencoba connect ulang ke backend...");
+                    AgentLog.Write("Reconnect: mencoba connect ulang ke backend...");
+                }
+
+                try
+                {
+                    await _serverConnection.ConnectAsync(ct);
+                    _logger.LogInformation("Agent connected & registered: {PcId}", pcId);
+                    AgentLog.Write($"Connected & registered ke backend: pcId={pcId}");
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Gagal connect ke backend — akan dicoba lagi tiap {Detik} detik",
+                        RECONNECT_INTERVAL_DETIK);
+                    AgentLog.Write(ex, "Gagal connect ke backend");
+                }
+            }
+            first = false;
+
+            try { await Task.Delay(TimeSpan.FromSeconds(RECONNECT_INTERVAL_DETIK), ct); }
+            catch (OperationCanceledException) { break; }
         }
     }
 

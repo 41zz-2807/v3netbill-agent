@@ -146,7 +146,9 @@ public sealed class ServerConnection : IAsyncDisposable
 
     private void OnDisconnected(object? sender, string reason)
     {
-        _logger.LogWarning("Terputus dari server: {Reason} — akan reconnect otomatis.", reason);
+        // CATATAN: SocketIOClient 4.x TIDAK reconnect otomatis di sini. Yang managing
+        // connect ulang adalah supervisor di Agent.Service.Worker (MaintainConnectionAsync).
+        _logger.LogWarning("Terputus dari server: {Reason} — supervisor akan mencoba connect ulang.", reason);
         StopHeartbeat();
         _registered = false; // izinkan register ulang saat reconnect berikutnya
     }
