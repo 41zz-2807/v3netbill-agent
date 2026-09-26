@@ -37,6 +37,7 @@ public sealed class ServerConnection : IAsyncDisposable
     private readonly string _agentToken;
     private readonly CancellationTokenSource _lifetimeCts = new();
     private Timer? _heartbeatTimer;
+    private readonly object _heartbeatLock = new();
     private bool _registered;
     private bool _disposed;
 
@@ -207,15 +208,35 @@ public sealed class ServerConnection : IAsyncDisposable
 
     private void StartHeartbeat()
     {
-        _heartbeatTimer ??= new Timer(
-            async _ => await SendHeartbeatAsync(_lifetimeCts.Token),
-            null,
-            TimeSpan.FromSeconds(HEARTBEAT_INTERVAL_DETIK),
-            TimeSpan.FromSeconds(HEARTBEAT_INTERVAL_DETIK));
+        lock (_heartbeatLock)
+        {
+            // Selalu buat timer baru, jangan ??=: StartHeartbeat dipanggil ulang dari
+            // supervisor setiap reconnect, sementara timer sebelumnya masih non-null.
+            _heartbeatTimer?.Dispose();
+            _heartbeatTimer = new Timer(
+                async _ => await SendHeartbeatAsync(_lifetimeCts.Token),
+                null,
+                TimeSpan.FromSeconds(HEARTBEAT_INTERVAL_DETIK),
+                TimeSpan.FromSeconds(HEARTBEAT_INTERVAL_DETIK));
+        }
         _logger.LogInformation("Heartbeat aktif: tiap {Interval}s", HEARTBEAT_INTERVAL_DETIK);
     }
 
-    private void StopHeartbeat() => _heartbeatTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+    /// <summary>
+    /// Matikan heartbeat DAN lepaskan timer-nya. Wajib mengosongkan referensi:
+    /// kalau hanya <c>Change(Timeout.Infinite, ...)</c> maka objek Timer tetap non-null
+    /// sehingga <c>StartHeartbeat</c> berikutnya menganggap timer masih hidup dan
+    /// tidak pernah membuatnya — heartbeat mati permanen setelah reconnect, padahal
+    /// socket masih connect dan log tetap bilang "Heartbeat aktif".
+    /// </summary>
+    private void StopHeartbeat()
+    {
+        lock (_heartbeatLock)
+        {
+            _heartbeatTimer?.Dispose();
+            _heartbeatTimer = null;
+        }
+    }
 
     public async ValueTask DisposeAsync()
     {
@@ -223,7 +244,6 @@ public sealed class ServerConnection : IAsyncDisposable
         _disposed = true;
 
         StopHeartbeat();
-        _heartbeatTimer?.Dispose();
         _lifetimeCts.Cancel();
 
         if (_client.Connected)
