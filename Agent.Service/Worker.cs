@@ -25,6 +25,7 @@ internal enum PipeMessageType
     SessionTick = 4,        // Countdown tick (sisaDetik)
     LoginResult = 5,        // Login result (sukses, alasan)
     PinVerifyResult = 6,    // PIN verification result (sukses)
+    ServerLink = 7,         // Status koneksi ke server berubah (terhubung/terputus)
 
     // Overlay → Service
     LoginRequest = 100,     // Login request (kode, password)
@@ -106,6 +107,7 @@ public class Worker : BackgroundService
         _serverConnection.SessionStopped += OnSessionStopped;
         _serverConnection.AdminLockReceived += OnAdminLock;
         _serverConnection.AdminShutdownReceived += OnAdminShutdown;
+        _serverConnection.ServerLinkChanged += OnServerLinkChanged;
 
         // Supervisor koneksi. SocketIOClient 4.x hanya mencoba retry SELAMA
         // ConnectAsync() masih berjalan (ReconnectionAttempts=30); begitu koneksi
@@ -293,6 +295,34 @@ public class Worker : BackgroundService
         }
     }
 
+    /// <summary>Kirim status koneksi server saat ini ke overlay (dipakai juga saat overlay baru connect).</summary>
+    private async Task SendCurrentServerLink()
+    {
+        bool terhubung = _serverConnection?.IsConnected == true;
+        await SendToOverlayAsync(new PipeMessage(PipeMessageType.ServerLink, JsonConvert.SerializeObject(new
+        {
+            terhubung,
+            alasan = (string?)null,
+        })));
+    }
+
+    /// <summary>Teruskan status koneksi server ke overlay (indikator hijau/merah di card login).</summary>
+    private async void OnServerLinkChanged(object? sender, ServerLinkEventArgs e)
+    {
+        try
+        {
+            await SendToOverlayAsync(new PipeMessage(PipeMessageType.ServerLink, JsonConvert.SerializeObject(new
+            {
+                terhubung = e.Connected,
+                alasan = e.Reason,
+            })));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Gagal mengirim status koneksi ke overlay");
+        }
+    }
+
     private async Task ForceLockScreenAsync()
     {
         lock (_stateLock)
@@ -425,6 +455,10 @@ public class Worker : BackgroundService
             case PipeMessageType.StateRequest:
                 {
                     await SendStateUpdateAsync();
+                    // Overlay bisa connect terlambat, jadi status koneksi wajib ikut
+                    // dikirim ulang — kalau tidak, indikator di card login stuck di
+                    // "Menghubungkan ke server..." selamanya.
+                    await SendCurrentServerLink();
                     break;
                 }
             case PipeMessageType.StopSessionRequest:

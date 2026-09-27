@@ -61,6 +61,9 @@ public sealed class ServerConnection : IAsyncDisposable
     /// <summary>Event: dashboard kirim <c>admin:shutdown</c> (perintah matikan PC).</summary>
     public event EventHandler<AdminShutdownEventArgs>? AdminShutdownReceived;
 
+    /// <summary>Koneksi Socket.IO berubah — dipakai overlay untuk indikator "terhubung".</summary>
+    public event EventHandler<ServerLinkEventArgs>? ServerLinkChanged;
+
     public bool IsConnected => _client.Connected;
 
     /// <summary>Buat koneksi baru. Belum connect sampai <see cref="ConnectAsync"/> dipanggil.</summary>
@@ -150,6 +153,7 @@ public sealed class ServerConnection : IAsyncDisposable
     private void OnConnected(object? sender, EventArgs e)
     {
         _logger.LogInformation("Terhubung ke server ({Namespace}) — registrasi agent...", SESSION_NAMESPACE);
+        ServerLinkChanged?.Invoke(this, new ServerLinkEventArgs(true));
         _ = RegisterAsync(_lifetimeCts.Token);
     }
 
@@ -162,6 +166,7 @@ public sealed class ServerConnection : IAsyncDisposable
         // Wajib ke AgentLog juga: kalau hanya _logger, alasannya hanya ada di Windows
         // Event Log sehingga tidak pernah terlihat saat membaca agent.log.
         AgentLog.Write($"Terputus dari server: {reason} — supervisor akan mencoba connect ulang");
+        ServerLinkChanged?.Invoke(this, new ServerLinkEventArgs(false, reason));
         StopHeartbeat();
         _registered = false; // izinkan register ulang saat reconnect berikutnya
     }
@@ -340,4 +345,19 @@ public sealed class AdminShutdownEventArgs : EventArgs
 {
     public AdminShutdownEventArgs(AdminShutdownPayload payload) => Payload = payload;
     public AdminShutdownPayload Payload { get; }
+}
+
+public sealed class ServerLinkEventArgs : EventArgs
+{
+    public ServerLinkEventArgs(bool connected, string? reason = null)
+    {
+        Connected = connected;
+        Reason = reason;
+    }
+
+    /// <summary>true = tersambung ke server, false = terputus.</summary>
+    public bool Connected { get; }
+
+    /// <summary>Alasan putusnya koneksi (hanya diisi saat Connected=false).</summary>
+    public string? Reason { get; }
 }

@@ -79,7 +79,30 @@
                     <TextBlock Text="LOGIN VOUCHER / MEMBER" 
                                FontSize="18" FontWeight="SemiBold" 
                                Style="{StaticResource OverlayTextStyle}"
-                               HorizontalAlignment="Center" Margin="0,0,0,20"/>
+                               HorizontalAlignment="Center" Margin="0,0,0,6"/>
+
+                    <StackPanel Orientation="Horizontal" 
+                                HorizontalAlignment="Center" Margin="0,0,0,20">
+                        <Ellipse Width="9" Height="9" VerticalAlignment="Center" Margin="0,0,7,0">
+                            <Ellipse.Style>
+                                <Style TargetType="Ellipse">
+                                    <Setter Property="Fill" Value="#868E96"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding ServerStatus}" Value="connected">
+                                            <Setter Property="Fill" Value="#2F9E44"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding ServerStatus}" Value="disconnected">
+                                            <Setter Property="Fill" Value="#E03131"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Ellipse.Style>
+                        </Ellipse>
+                        <TextBlock Text="{Binding ServerStatusText}"
+                                   FontSize="11"
+                               Style="{StaticResource OverlayTextStyle}"
+                               VerticalAlignment="Center"/>
+                    </StackPanel>
 
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
                         <TextBlock Text="Kode:" Width="70" Style="{StaticResource OverlayTextStyle}" VerticalAlignment="Center" FontSize="15"/>

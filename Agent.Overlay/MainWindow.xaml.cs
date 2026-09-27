@@ -298,6 +298,9 @@ public partial class MainWindow : Window
                 case PipeMessageType.PinVerifyResult:
                     HandlePinVerifyResult(msg.Payload);
                     break;
+                case PipeMessageType.ServerLink:
+                    _stateProxy.ApplyServerLink(msg.Payload);
+                    break;
             }
         });
     }

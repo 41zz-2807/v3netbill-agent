@@ -184,6 +184,7 @@ public enum PipeMessageType
     SessionTick = 4,
     LoginResult = 5,
     PinVerifyResult = 6,
+    ServerLink = 7,
     LoginRequest = 100,
     PinVerifyRequest = 101,
     StateRequest = 102,

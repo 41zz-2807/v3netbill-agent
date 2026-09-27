@@ -20,11 +20,37 @@ private readonly ILogger<SessionStateProxy> _logger;
     private string? _akunNama;
     private string? _akunTipe;
     private DateTime _lastTickUtc = DateTime.MinValue;
+    private string _serverStatus = ServerStatusUnknown;
 
     public SessionStateProxy(ILogger<SessionStateProxy> logger)
     {
         _logger = logger;
     }
+
+    public const string ServerStatusUnknown = "connecting";
+    public const string ServerStatusConnected = "connected";
+    public const string ServerStatusDisconnected = "disconnected";
+
+    /// <summary>Status koneksi server: connecting | connected | disconnected.</summary>
+    public string ServerStatus
+    {
+        get => _serverStatus;
+        set
+        {
+            if (_serverStatus == value) return;
+            _serverStatus = value;
+            OnPropertyChanged(nameof(ServerStatus));
+            OnPropertyChanged(nameof(ServerStatusText));
+        }
+    }
+
+    /// <summary>Teks status koneksi untuk indikator di card login.</summary>
+    public string ServerStatusText => _serverStatus switch
+    {
+        ServerStatusConnected => "Terhubung ke server",
+        ServerStatusDisconnected => "Terputus dari server",
+        _ => "Menghubungkan ke server...",
+    };
 
     public bool Locked
     {
@@ -227,6 +253,25 @@ private readonly ILogger<SessionStateProxy> _logger;
         }
     }
 
+    /// <summary>Terapkan status koneksi server (indikator hijau/merah di card login).</summary>
+    public void ApplyServerLink(string json)
+    {
+        try
+        {
+            var data = JsonConvert.DeserializeObject<ServerLinkPayload>(json);
+            if (data == null) return;
+            ServerStatus = data.Terhubung ? ServerStatusConnected : ServerStatusDisconnected;
+            _logger.LogInformation(
+                "Status server: {Status}{Alasan}",
+                ServerStatusText,
+                string.IsNullOrEmpty(data.Alasan) ? "" : $" ({data.Alasan})");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to parse server link status");
+        }
+    }
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
     protected virtual void OnPropertyChanged(string propertyName)
@@ -235,4 +280,5 @@ private readonly ILogger<SessionStateProxy> _logger;
     private record StateUpdatePayload(bool Locked, string? SessionId, int DurasiDetik, int SisaDetik);
     private record SessionStartedPayload(string? KodeUnik, string? Nama, string? Tipe);
     private record TickPayload(int SisaDetik);
+    private record ServerLinkPayload(bool Terhubung, string? Alasan);
 }
