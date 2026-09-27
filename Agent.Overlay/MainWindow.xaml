@@ -17,6 +17,65 @@
             <Setter Property="Foreground" Value="White"/>
             <Setter Property="FontFamily" Value="Segoe UI"/>
         </Style>
+
+        <!-- Meniru box-shadow: inset 2px 5px 10px dari CSS Uiverse. WPF tidak punya
+             inner shadow, jadi dipakai gradien yang lebih gelap di atas lalu memudar
+             ke bawah. Satu elemen, tanpa Border bersarang. -->
+        <LinearGradientBrush x:Key="FieldInsetBrush" StartPoint="0,0" EndPoint="0,1">
+            <GradientStop Color="#33000000" Offset="0"/>
+            <GradientStop Color="#1A000000" Offset="0.30"/>
+            <GradientStop Color="#0A000000" Offset="0.70"/>
+            <GradientStop Color="#00000000" Offset="1"/>
+        </LinearGradientBrush>
+
+        <Style x:Key="FieldCaptionStyle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#8A93A6"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,0,0,7"/>
+        </Style>
+
+        <!-- Template field berbentuk pil. PART_ContentHost wajib dipakai agar
+             TextBox/PasswordBox tetap menjulkan teks dengan benar. -->
+        <ControlTemplate x:Key="PillFieldTemplate" TargetType="TextBox">
+            <Border x:Name="bd"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="23">
+                <ScrollViewer x:Name="PART_ContentHost"
+                              VerticalAlignment="Center"
+                              Margin="{TemplateBinding Padding}"
+                              Focusable="False"
+                              HorizontalScrollBarVisibility="Hidden"
+                              VerticalScrollBarVisibility="Hidden"/>
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                    <Setter TargetName="bd" Property="BorderBrush" Value="#00D4AA"/>
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+
+        <ControlTemplate x:Key="PillPasswordTemplate" TargetType="PasswordBox">
+            <Border x:Name="bd"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="23">
+                <ScrollViewer x:Name="PART_ContentHost"
+                              VerticalAlignment="Center"
+                              Margin="{TemplateBinding Padding}"
+                              Focusable="False"
+                              HorizontalScrollBarVisibility="Hidden"
+                              VerticalScrollBarVisibility="Hidden"/>
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                    <Setter TargetName="bd" Property="BorderBrush" Value="#00D4AA"/>
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
     </Window.Resources>
 
     <Grid x:Name="RootGrid">
@@ -32,58 +91,21 @@
                     Width="420"
                     Visibility="Visible">
             
-            <!-- Countdown Card (visible when Locked) -->
-            <Border x:Name="CountdownCard" 
-                    Background="#E61E1E24" 
-                    CornerRadius="16" 
-                    Padding="32" 
-                    Margin="0,0,0,16"
-                    Visibility="Collapsed">
-                <StackPanel>
-                    <TextBlock x:Name="StatusText" 
-                               Text="SESI BERJALAN" 
-                               FontSize="22" FontWeight="SemiBold" 
-                               Style="{StaticResource OverlayTextStyle}"
-                               HorizontalAlignment="Center" Margin="0,0,0,8"/>
-                    <TextBlock x:Name="CountdownText" 
-                               Text="--:--" 
-                               FontSize="80" FontWeight="Bold" 
-                               Foreground="#00D4AA" 
-                               HorizontalAlignment="Center"
-                               FontFamily="Consolas, Courier New, monospace"/>
-                    <TextBlock x:Name="SessionInfoText" 
-                               Text="Sesi voucher/member aktif" 
-                               FontSize="14" 
-                               Foreground="#888888" 
-                               HorizontalAlignment="Center" Margin="0,12,0,0"/>
-                    
-                    <!-- Progress bar -->
-                    <ProgressBar x:Name="ProgressBar" 
-                                 Height="6" 
-                                 Margin="0,16,0,0"
-                                 Background="#333333" 
-                                 BorderThickness="0"
-                                 Foreground="#00D4AA"
-                                 Maximum="100"
-                                 Value="0"/>
-                </StackPanel>
-            </Border>
-
-            <!-- Login Card (visible when Unlocked) -->
+            <!-- Login Card (visible when Locked) -->
             <Border x:Name="LoginCard" 
-                    Background="#E61E1E24" 
-                    CornerRadius="16" 
-                    Padding="32"
+                    Background="#F21A1A22" 
+                    CornerRadius="20" 
+                    Padding="34,30"
                     Visibility="Visible">
                 <StackPanel>
                     <TextBlock Text="LOGIN VOUCHER / MEMBER" 
                                FontSize="18" FontWeight="SemiBold" 
                                Style="{StaticResource OverlayTextStyle}"
-                               HorizontalAlignment="Center" Margin="0,0,0,6"/>
+                               HorizontalAlignment="Center" Margin="0,0,0,4"/>
 
                     <StackPanel Orientation="Horizontal" 
-                                HorizontalAlignment="Center" Margin="0,0,0,20">
-                        <Ellipse Width="9" Height="9" VerticalAlignment="Center" Margin="0,0,7,0">
+                                HorizontalAlignment="Center" Margin="0,0,0,24">
+                        <Ellipse Width="7" Height="7" VerticalAlignment="Center" Margin="0,0,6,0">
                             <Ellipse.Style>
                                 <Style TargetType="Ellipse">
                                     <Setter Property="Fill" Value="#868E96"/>
@@ -100,38 +122,64 @@
                         </Ellipse>
                         <TextBlock Text="{Binding ServerStatusText}"
                                    FontSize="11"
-                               Style="{StaticResource OverlayTextStyle}"
-                               VerticalAlignment="Center"/>
+                                   Style="{StaticResource OverlayTextStyle}"
+                                   VerticalAlignment="Center"/>
                     </StackPanel>
 
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                        <TextBlock Text="Kode:" Width="70" Style="{StaticResource OverlayTextStyle}" VerticalAlignment="Center" FontSize="15"/>
-                        <TextBox x:Name="KodeTextBox" Width="280" Height="40" FontSize="16" 
+                    <TextBlock Text="KODE VOUCHER" Style="{StaticResource FieldCaptionStyle}"/>
+                    <Grid Margin="0,0,0,18">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="46"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Path Grid.Column="0"
+                              Data="M12,12c2.21,0 4,-1.79 4,-4s-1.79,-4 -4,-4 -4,1.79 -4,4 1.79,4 4,4zM12,14c-2.67,0 -8,1.34 -8,4v2h16v-2c0,-2.66 -5.33,-4 -8,-4z"
+                              Stroke="#8A93A6" StrokeThickness="1.6"
+                              Stretch="Uniform"
+                              Width="20" Height="20"
+                              HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <TextBox x:Name="KodeTextBox" Grid.Column="1"
+                                 Height="46" FontSize="16"
                                  VerticalContentAlignment="Center" MaxLength="6"
-                                 Padding="8,0" BorderThickness="1" BorderBrush="#444"
-                                 Background="#111" Foreground="White" CaretBrush="#00D4AA"/>
-                    </StackPanel>
+                                 Padding="16,0" BorderThickness="1" BorderBrush="#2EFFFFFF"
+                                 Background="{StaticResource FieldInsetBrush}"
+                                 Foreground="White" CaretBrush="#00D4AA"
+                                 Template="{StaticResource PillFieldTemplate}"/>
+                    </Grid>
 
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
-                        <TextBlock Text="Password:" Width="70" Style="{StaticResource OverlayTextStyle}" VerticalAlignment="Center" FontSize="15"/>
-                        <PasswordBox x:Name="PasswordBox" Width="280" Height="40" FontSize="16" 
+                    <TextBlock Text="PASSWORD" Style="{StaticResource FieldCaptionStyle}"/>
+                    <Grid Margin="0,0,0,26">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="46"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Path Grid.Column="0"
+                              Data="M18,8h-1V6c0,-2.76 -2.24,-5 -5,-5S7,3.24 7,6v2H6c-1.1,0 -2,0.9 -2,2v10c0,1.1 0.9,2 2,2h12c1.1,0 2,-0.9 2,-2V10c0,-1.1 -0.9,-2 -2,-2zM12,17c-1.1,0 -2,-0.9 -2,-2s0.9,-2 2,-2 2,0.9 2,2 -0.9,2 -2,2zM15.1,8H8.9V6c0,-1.71 1.39,-3 3.1,-3s3.1,1.29 3.1,3v2z"
+                              Stroke="#8A93A6" StrokeThickness="1.6"
+                              Stretch="Uniform"
+                              Width="20" Height="20"
+                              HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <PasswordBox x:Name="PasswordBox" Grid.Column="1"
+                                     Height="46" FontSize="16"
                                      VerticalContentAlignment="Center" MaxLength="4"
-                                     Padding="8,0" BorderThickness="1" BorderBrush="#444"
-                                     Background="#111" Foreground="White" CaretBrush="#00D4AA"/>
-                    </StackPanel>
+                                     Padding="16,0" BorderThickness="1" BorderBrush="#2EFFFFFF"
+                                     Background="{StaticResource FieldInsetBrush}"
+                                     Foreground="White" CaretBrush="#00D4AA"
+                                     Template="{StaticResource PillPasswordTemplate}"/>
+                    </Grid>
 
                     <Button x:Name="LoginButton" 
                             Content="LOGIN" 
-                            Height="48" 
-                            FontSize="16" FontWeight="Bold"
+                            Height="50" 
+                            FontSize="15" FontWeight="Bold"
                             Background="#00D4AA" 
-                            Foreground="#111" 
+                            Foreground="#0C1118" 
                             BorderThickness="0"
                             Cursor="Hand"
                             Click="LoginButton_Click">
                         <Button.Template>
                             <ControlTemplate TargetType="Button">
-                                <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="8">
+                                <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="10">
                                     <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 </Border>
                                 <ControlTemplate.Triggers>
@@ -142,8 +190,8 @@
                                         <Setter TargetName="bd" Property="Background" Value="#00B8A0"/>
                                     </Trigger>
                                     <Trigger Property="IsEnabled" Value="False">
-                                        <Setter TargetName="bd" Property="Background" Value="#333333"/>
-                                        <Setter Property="Foreground" Value="#666"/>
+                                        <Setter TargetName="bd" Property="Background" Value="#2A3040"/>
+                                        <Setter Property="Foreground" Value="#5A6478"/>
                                     </Trigger>
                                 </ControlTemplate.Triggers>
                             </ControlTemplate>
@@ -155,10 +203,11 @@
                                FontSize="13" 
                                Foreground="#FF6B6B" 
                                HorizontalAlignment="Center" 
-                               Margin="0,12,0,0"
+                               Margin="0,14,0,0"
                                Visibility="Collapsed"/>
                 </StackPanel>
             </Border>
+
 
             <!-- Technician PIN Dialog (hidden by default) -->
             <Border x:Name="PinDialog" 
@@ -214,19 +263,19 @@
 
         <!-- Mini countdown window (visible while session active, desktop usable) — gaya Uiverse (navy + gradient cyan) -->
         <Border x:Name="MiniPanel" 
-                Background="#FF1B233D" 
-                CornerRadius="16" 
-                BorderBrush="#FF50F6FF" BorderThickness="1"
+                Background="#FF161A24" 
+                CornerRadius="12" 
+                BorderBrush="#3D00D4AA" BorderThickness="1"
                 HorizontalAlignment="Right" 
                 VerticalAlignment="Top" 
                 Margin="16"
                 Visibility="Collapsed">
             <Border.Effect>
-                <DropShadowEffect BlurRadius="24" ShadowDepth="4" Opacity="0.55" Color="#049FBB"/>
+                <DropShadowEffect BlurRadius="24" ShadowDepth="4" Opacity="0.5" Color="#00D4AA"/>
             </Border.Effect>
             <StackPanel Width="300">
-                <!-- Header: title di strip gradient cyan gaya Uiverse -->
-                <Border CornerRadius="16,16,0,0" Padding="14,10,6,10">
+                <!-- Header: strip gradien cyan gaya Uiverse -->
+                <Border CornerRadius="12,12,0,0" Padding="14,10,6,10">
                     <Border.Background>
                         <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
                             <GradientStop Color="#049FBB" Offset="0"/>
@@ -262,39 +311,56 @@
                     </Grid>
                 </Border>
 
-                <Border Background="#FF1B233D" CornerRadius="0,0,16,16" Padding="14,10,14,12">
+                <Border Background="#FF161A24" CornerRadius="0,0,12,12" Padding="14,12,14,14">
                     <StackPanel>
-                        <!-- Identitas akun (voucher / member) — label kecil di atas nomor -->
-                        <TextBlock Text="Akun" 
+                        <!-- Label kecil di atas identitas -->
+                        <TextBlock Text="AKUN" 
                                    FontSize="10" FontWeight="SemiBold"
-                                   Foreground="#50F6FF"
+                                   Foreground="#00D4AA"
                                    HorizontalAlignment="Center"
-                                   Margin="0,2,0,0"/>
+                                   Margin="0,0,0,1"/>
 
-                        <!-- Nomor voucher / nama member (besar, jelas) -->
+                        <!-- Judul (gaya song-title) -->
                         <TextBlock Text="{Binding AkunLabel}"
                                    FontSize="15" FontWeight="Bold"
                                    Foreground="#FFFFFF"
                                    HorizontalAlignment="Center"
                                    TextTrimming="CharacterEllipsis"
                                    MaxWidth="272"
-                                   Margin="4,2,4,2"/>
+                                   Margin="2,0,2,0"/>
 
-                        <!-- Sisa waktu (countdown) -->
+                        <!-- Subjudul (gaya artist) — PC mana yang sedang berjalan -->
+                        <TextBlock x:Name="PcLabelText"
+                                   Text="PC"
+                                   FontSize="12"
+                                   Foreground="#7A8CA8"
+                                   HorizontalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis"
+                                   MaxWidth="272"
+                                   Margin="2,2,2,0"/>
+
+                        <!-- Sisa waktu — sengaja tetap besar agar terbaca dari jauh -->
                         <TextBlock Text="{Binding CountdownText}"
                                    FontSize="46" FontWeight="Bold"
-                                   Foreground="#50F6FF"
+                                   Foreground="#00D4AA"
                                    FontFamily="Consolas, Courier New, monospace"
                                    HorizontalAlignment="Center"
-                                   Margin="4,0,4,2"/>
+                                   Margin="2,6,2,2"/>
 
-                        <ProgressBar x:Name="MiniProgressBar"
-                                     Height="5"
-                                     Margin="6,0,6,8"
-                                     Background="#28324E" BorderThickness="0"
-                                     Foreground="#50F6FF"
-                                     Maximum="100"
-                                     Value="{Binding ProgressPercent, Mode=OneWay}"/>
+                        <!-- Progress 4px gaya audio player. Nilai tetap dari
+                             ProgressPercent server, bukan animasi dekoratif.
+                             Border + ClipToBounds membulatkan ujung tanpa
+                             mengganti template ProgressBar (nilainya tetap
+                             terbaca dan andal). -->
+                        <Border Height="4" CornerRadius="2" Background="#252B3D"
+                                Margin="4,0,4,10" ClipToBounds="True">
+                            <ProgressBar x:Name="MiniProgressBar"
+                                         Background="Transparent"
+                                         BorderThickness="0"
+                                         Foreground="#00D4AA"
+                                         Maximum="100"
+                                         Value="{Binding ProgressPercent, Mode=OneWay}"/>
+                        </Border>
 
                         <!-- Tombol STOP SESI -->
                         <Button x:Name="StopSesiButton"
@@ -303,7 +369,7 @@
                                 FontSize="14" FontWeight="Bold"
                                 Background="#FF5252" Foreground="#FFFFFF"
                                 BorderThickness="0"
-                                Margin="6,4,6,2"
+                                Margin="2,0,2,0"
                                 Cursor="Hand"
                                 Click="StopSesiButton_Click">
                             <Button.Template>
@@ -323,27 +389,49 @@
                             </Button.Template>
                         </Button>
 
-                        <!-- Pesan konfirmasi/status stop sesi -->
+                        <!-- Status / pesan error -->
                         <TextBlock x:Name="MiniStatusText"
                                    FontSize="12" Foreground="#FFD166"
                                    HorizontalAlignment="Center"
-                                   Margin="8,6,8,0"
+                                   Margin="4,6,4,0"
+                                   TextWrapping="Wrap"
                                    Visibility="Collapsed"/>
                     </StackPanel>
                 </Border>
             </StackPanel>
         </Border>
 
-        <!-- Tombol Admin PIN — akses mode teknisi tanpa hotkey (aman remote via RustDesk) -->
+        <!-- Akses mode teknisi (bypass overlay) — sengaja tanpa bentuk tombol, hanya
+             teks samar di kiri bawah supaya tidak menarik perhatian user yang lewat.
+             Tetap diklik untuk membuka dialog PIN. Dipakai teknisi remote via RustDesk. -->
         <Button x:Name="AdminPinButton"
-                Content="Admin PIN"
-                Width="110" Height="36"
-                FontSize="12" FontWeight="SemiBold"
-                Background="#66000000" Foreground="#AAAAAA"
-                BorderThickness="1" BorderBrush="#33FFFFFF"
+                Content="maintenance"
+                FontSize="11"
+                Background="Transparent" BorderThickness="0" Padding="0"
                 Cursor="Hand"
                 HorizontalAlignment="Left" VerticalAlignment="Bottom"
-                Margin="16,0,0,12"
-                Click="AdminPinButton_Click"/>
+                Margin="16,0,0,10"
+                Click="AdminPinButton_Click">
+            <Button.Style>
+                <Style TargetType="Button">
+                    <Setter Property="Foreground" Value="#45FFFFFF"/>
+                    <Style.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="#99FFFFFF"/>
+                        </Trigger>
+                    </Style.Triggers>
+                </Style>
+            </Button.Style>
+            <!-- Template minimal: template bawaan WPF bisa menggambar background
+                 saat hover walau Background=Transparent, sehingga bentuk tombol
+                 masih bisa terlihat. Template ini memastikan hanya teks yang tampil. -->
+            <Button.Template>
+                <ControlTemplate TargetType="Button">
+                    <ContentPresenter HorizontalAlignment="Center"
+                                      VerticalAlignment="Center"
+                                      RecognizesAccessKey="True"/>
+                </ControlTemplate>
+            </Button.Template>
+        </Button>
     </Grid>
 </Window>

@@ -62,6 +62,33 @@ public partial class MainWindow : Window
         Loaded += OnLoaded;
         Closing += OnClosing;
         KeyDown += OnKeyDown; // for technician shortcut
+
+        SetPcLabel();
+    }
+
+    /// <summary>
+    /// Subjudul mini panel (gaya "artist" di UI audio player) diisi nama PC dari
+    /// registry yang sama dengan UninstallGuardWindow, supaya teknisi bisa langsung
+    /// tahu PC mana yang sedang aktif tanpa membuka halaman web.
+    /// </summary>
+    private void SetPcLabel()
+    {
+        string? label = null;
+        try
+        {
+            using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                @"SOFTWARE\v3Netbill\Agent");
+            var pcId = key?.GetValue("PcId") as string;
+            if (!string.IsNullOrWhiteSpace(pcId)) label = pcId;
+        }
+        catch (Exception ex)
+        {
+            AgentLog.Write(ex, "Baca PcId dari registry gagal");
+        }
+
+        if (string.IsNullOrWhiteSpace(label)) label = _config["Agent:PcId"];
+
+        if (!string.IsNullOrWhiteSpace(label)) PcLabelText.Text = label!;
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
@@ -178,7 +205,6 @@ public partial class MainWindow : Window
             // Fullscreen login (idle)
             OverlayBackground.Visibility = Visibility.Visible;
             ContentPanel.Visibility = Visibility.Visible;
-            CountdownCard.Visibility = Visibility.Collapsed;
             LoginCard.Visibility = Visibility.Visible;
             MiniPanel.Visibility = Visibility.Collapsed;
             AdminPinButton.Visibility = Visibility.Visible;
