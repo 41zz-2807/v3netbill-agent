@@ -151,7 +151,10 @@ public sealed class ServerConnection : IAsyncDisposable
         _client.On("agent:otp_config", ctx =>
         {
             var payload = ctx.GetValue<OtpConfigPayload>(0);
-            OtpConfigReceived?.Invoke(this, new OtpConfigEventArgs(payload.BotToken ?? "", payload.ChatId ?? ""));
+            if (payload != null)
+            {
+                OtpConfigReceived?.Invoke(this, new OtpConfigEventArgs(payload.BotToken ?? "", payload.ChatId ?? ""));
+            }
             return Task.CompletedTask;
         });
 

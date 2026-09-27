@@ -27,7 +27,7 @@ namespace V3Netbill.Agent.Service;
 /// registry, <see cref="IsConfigured"/> jadi false, dan agent kembali ke PIN emergency
 /// bawaan (<c>123456</c>) seperti sebelum fitur ini ada.
 /// </summary>
-internal sealed class OtpService
+public sealed class OtpService
 {
     /// <summary>Masa berlaku OTP sejak dikirim.</summary>
     private static readonly TimeSpan MasaBerlaku = TimeSpan.FromMinutes(5);
