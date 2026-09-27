@@ -174,7 +174,13 @@
                     <TextBlock Text="Masukkan PIN untuk akses desktop" 
                                FontSize="14" 
                                Foreground="#AAAAAA" 
-                               HorizontalAlignment="Center" Margin="0,0,0,20"/>
+                               HorizontalAlignment="Center" Margin="0,0,0,10"/>
+
+                    <Button x:Name="OtpButton" Content="KIRIM OTP KE TELEGRAM" 
+                            Width="220" Height="36"
+                            Background="#1F7A8C" Foreground="White" FontWeight="Bold" BorderThickness="0"
+                            Margin="0,0,0,16" HorizontalAlignment="Center"
+                            Click="OtpButton_Click"/>
 
                     <PasswordBox x:Name="PinBox" 
                                  Width="200" Height="40" FontSize="18" 

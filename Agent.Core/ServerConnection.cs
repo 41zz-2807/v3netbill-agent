@@ -64,6 +64,9 @@ public sealed class ServerConnection : IAsyncDisposable
     /// <summary>Koneksi Socket.IO berubah — dipakai overlay untuk indikator "terhubung".</summary>
     public event EventHandler<ServerLinkEventArgs>? ServerLinkChanged;
 
+    /// <summary>Server mendorong konfigurasi OTP Telegram baru.</summary>
+    public event EventHandler<OtpConfigEventArgs>? OtpConfigReceived;
+
     public bool IsConnected => _client.Connected;
 
     /// <summary>Buat koneksi baru. Belum connect sampai <see cref="ConnectAsync"/> dipanggil.</summary>
@@ -139,6 +142,16 @@ public sealed class ServerConnection : IAsyncDisposable
         {
             var payload = ctx.GetValue<AdminLockPayload>(0);
             AdminLockReceived?.Invoke(this, new AdminLockEventArgs(payload));
+            return Task.CompletedTask;
+        });
+
+        // Konfigurasi OTP Telegram yang didorong server saat admin menyimpannya
+        // di halaman Pengaturan. Agent menyimpannya ke disk agar tetap bisa
+        // mengirim OTP ke Telegram walaupun server sedang mati.
+        _client.On("agent:otp_config", ctx =>
+        {
+            var payload = ctx.GetValue<OtpConfigPayload>(0);
+            OtpConfigReceived?.Invoke(this, new OtpConfigEventArgs(payload.BotToken ?? "", payload.ChatId ?? ""));
             return Task.CompletedTask;
         });
 
@@ -360,4 +373,21 @@ public sealed class ServerLinkEventArgs : EventArgs
 
     /// <summary>Alasan putusnya koneksi (hanya diisi saat Connected=false).</summary>
     public string? Reason { get; }
+}
+
+public sealed class OtpConfigEventArgs : EventArgs
+{
+    public OtpConfigEventArgs(string botToken, string chatId)
+    {
+        BotToken = botToken;
+        ChatId = chatId;
+    }
+
+    /// <summary>Token bot Telegram. Kosong = fitur OTP dimatikan.</summary>
+    public string BotToken { get; }
+
+    /// <summary>Chat id tujuan. Kosong = fitur OTP dimatikan.</summary>
+    public string ChatId { get; }
+
+    public bool Enabled => !string.IsNullOrWhiteSpace(BotToken) && !string.IsNullOrWhiteSpace(ChatId);
 }

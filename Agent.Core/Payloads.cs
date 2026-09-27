@@ -87,3 +87,14 @@ public sealed class AdminShutdownPayload
     [JsonPropertyName("pcId")]
     public string PcId { get; set; } = string.Empty;
 }
+
+/// <summary>Event <c>agent:otp_config</c> — server mendorong konfigurasi OTP Telegram
+/// setelah admin menyimpannya di halaman Pengaturan. Nilai kosong = fitur OTP dimatikan.</summary>
+public sealed class OtpConfigPayload
+{
+    [JsonPropertyName("botToken")]
+    public string? BotToken { get; set; }
+
+    [JsonPropertyName("chatId")]
+    public string? ChatId { get; set; }
+}

@@ -166,6 +166,12 @@ public class PipeClient : IDisposable
         await SendAsync(new PipeMessage(PipeMessageType.StopSessionRequest, "{}"), ct);
     }
 
+    /// <summary>Minta service mengirim OTP maintenance ke Telegram.</summary>
+    public async Task SendOtpRequestAsync(CancellationToken ct = default)
+    {
+        await SendAsync(new PipeMessage(PipeMessageType.OtpRequest, "{}"), ct);
+    }
+
     public void Dispose()
     {
         _cts?.Cancel();
@@ -185,10 +191,12 @@ public enum PipeMessageType
     LoginResult = 5,
     PinVerifyResult = 6,
     ServerLink = 7,
+    OtpResult = 8,
     LoginRequest = 100,
     PinVerifyRequest = 101,
     StateRequest = 102,
-    StopSessionRequest = 103
+    StopSessionRequest = 103,
+    OtpRequest = 104
 }
 
 public record PipeMessage(PipeMessageType Type, string Payload);

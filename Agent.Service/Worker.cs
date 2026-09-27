@@ -26,12 +26,14 @@ internal enum PipeMessageType
     LoginResult = 5,        // Login result (sukses, alasan)
     PinVerifyResult = 6,    // PIN verification result (sukses)
     ServerLink = 7,         // Status koneksi ke server berubah (terhubung/terputus)
+    OtpResult = 8,          // Hasil permintaan OTP (berhasil/gagal + pesan)
 
     // Overlay → Service
     LoginRequest = 100,     // Login request (kode, password)
     PinVerifyRequest = 101, // PIN verify request (pin)
     StateRequest = 102,     // Overlay minta state terkini (setelah reconnect)
-    StopSessionRequest = 103 // Overlay minta hentikan sesi yang berjalan (stop sendiri)
+    StopSessionRequest = 103, // Overlay minta hentikan sesi yang berjalan (stop sendiri)
+    OtpRequest = 104        // Overlay minta kirim OTP ke Telegram
 }
 
 internal record PipeMessage(PipeMessageType Type, string Payload);
@@ -43,6 +45,7 @@ public class Worker : BackgroundService
 {
     private readonly ILogger<Worker> _logger;
     private readonly IConfiguration _configuration;
+    private readonly OtpService _otp;
     private ServerConnection? _serverConnection;
     private CancellationTokenSource? _cts;
     private NamedPipeServerStream? _pipeServer;
@@ -69,10 +72,11 @@ public class Worker : BackgroundService
     /// </summary>
     private const int RECONNECT_TIMEOUT_DETIK = 45;
 
-    public Worker(ILogger<Worker> logger, IConfiguration configuration)
+    public Worker(ILogger<Worker> logger, IConfiguration configuration, OtpService otp)
     {
         _logger = logger;
         _configuration = configuration;
+        _otp = otp;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -108,6 +112,7 @@ public class Worker : BackgroundService
         _serverConnection.AdminLockReceived += OnAdminLock;
         _serverConnection.AdminShutdownReceived += OnAdminShutdown;
         _serverConnection.ServerLinkChanged += OnServerLinkChanged;
+        _serverConnection.OtpConfigReceived += OnOtpConfigReceived;
 
         // Supervisor koneksi. SocketIOClient 4.x hanya mencoba retry SELAMA
         // ConnectAsync() masih berjalan (ReconnectionAttempts=30); begitu koneksi
@@ -295,6 +300,15 @@ public class Worker : BackgroundService
         }
     }
 
+    /// <summary>Server mendorong config OTP baru → simpan ke registry PC (offline).</summary>
+    private void OnOtpConfigReceived(object? sender, OtpConfigEventArgs e)
+    {
+        _otp.SimpanConfig(e.BotToken, e.ChatId);
+        AgentLog.Write(e.Enabled
+            ? $"Config OTP diterima dari server (chat {e.ChatId}) — disimpan ke registry"
+            : "Config OTP dikosongkan dari server — OTP dimatikan, kembali ke PIN emergency");
+    }
+
     /// <summary>Kirim status koneksi server saat ini ke overlay (dipakai juga saat overlay baru connect).</summary>
     private async Task SendCurrentServerLink()
     {
@@ -446,10 +460,45 @@ public class Worker : BackgroundService
                     var req = JsonConvert.DeserializeObject<PinVerifyRequestPayload>(msg.Payload);
                     if (req != null)
                     {
+                        // OTP dicek dulu secara LOKAL: jalur ini harus tetap jalan
+                        // walau server mati — justru dipakai untuk mode maintenance.
+                        // Kalau bukan OTP, baru jatuh ke verifikasi PIN backend.
+                        var (otpOk, otpPesan) = await _otp.VerifikasiAsync(req.Pin, ct);
+                        if (otpOk)
+                        {
+                            AgentLog.Write("PIN diterima sebagai OTP maintenance — bypass diberikan");
+                            await SendToOverlayAsync(new PipeMessage(PipeMessageType.PinVerifyResult,
+                                JsonConvert.SerializeObject(new { sukses = true, viaOtp = true })));
+                            break;
+                        }
+                        if (otpPesan != null)
+                        {
+                            // Ada OTP aktif tapi input tidak cocok — laporkan errornya
+                            // supaya pengguna tahu harus minta OTP baru.
+                            await SendToOverlayAsync(new PipeMessage(PipeMessageType.PinVerifyResult,
+                                JsonConvert.SerializeObject(new { sukses = false, pesan = otpPesan })));
+                            break;
+                        }
+
                         bool ok = await VerifyPinWithBackendAsync(req.Pin, ct);
                         var resp = new { sukses = ok };
                         await SendToOverlayAsync(new PipeMessage(PipeMessageType.PinVerifyResult, JsonConvert.SerializeObject(resp)));
                     }
+                    break;
+                }
+            case PipeMessageType.OtpRequest:
+                {
+                    string pcId = GetConfig("Agent:PcId", "PcId", "PC001");
+                    var otp = await _otp.KirimOtpAsync(pcId, ct);
+                    var res = otp != null
+                        ? new { sukses = true, pesan = $"OTP dikirim ke Telegram. Berlaku 5 menit." }
+                        : new
+                        {
+                            sukses = false,
+                            pesan = "Gagal mengirim OTP. Pastikan bot token & chat id sudah diisi di Pengaturan.",
+                        };
+                    if (otp == null) AgentLog.Write("Permintaan OTP gagal — OTP tidak dibuat");
+                    await SendToOverlayAsync(new PipeMessage(PipeMessageType.OtpResult, JsonConvert.SerializeObject(res)));
                     break;
                 }
             case PipeMessageType.StateRequest:

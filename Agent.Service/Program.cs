@@ -18,6 +18,7 @@ public class Program
             .AddCommandLine(args);
 
         // Services
+        builder.Services.AddSingleton<OtpService>();
         builder.Services.AddHostedService<Worker>();
         builder.Services.AddWindowsService(options =>
         {

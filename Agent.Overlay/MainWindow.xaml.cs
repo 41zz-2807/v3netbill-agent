@@ -301,6 +301,9 @@ public partial class MainWindow : Window
                 case PipeMessageType.ServerLink:
                     _stateProxy.ApplyServerLink(msg.Payload);
                     break;
+                case PipeMessageType.OtpResult:
+                    HandleOtpResult(msg.Payload);
+                    break;
             }
         });
     }
@@ -344,17 +347,87 @@ public partial class MainWindow : Window
                 _keyboardHook.Disable(); // allow desktop access
                 // Sembunyikan overlay agar desktop terlihat (akses teknisi)
                 WindowState = WindowState.Minimized;
-                _logger.LogInformation("Technician PIN verified — desktop access granted");
+                AgentLog.Write(result.ViaOtp == true
+                    ? "OTP maintenance terverifikasi — akses desktop diberikan"
+                    : "PIN teknisi terverifikasi — akses desktop diberikan");
+                _logger.LogInformation("PIN/OTP verified — desktop access granted");
             }
             else
             {
-                // Show error briefly
-                _logger.LogWarning("Technician PIN invalid");
+                // OTP salah / kedaluwarsa / sudah dipakai → tampilkan alasannya.
+                if (!string.IsNullOrWhiteSpace(result?.Pesan))
+                {
+                    PinHintText.Text = result.Pesan;
+                    PinHintText.Foreground = System.Windows.Media.Brushes.OrangeRed;
+                    PinHintText.Visibility = Visibility.Visible;
+                    AgentLog.Write($"PIN/OTP ditolak: {result.Pesan}");
+                }
+                else
+                {
+                    PinHintText.Text = "PIN salah.";
+                    PinHintText.Foreground = System.Windows.Media.Brushes.OrangeRed;
+                    PinHintText.Visibility = Visibility.Visible;
+                    _logger.LogWarning("Technician PIN invalid");
+                }
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "PIN verify result parse error");
+        }
+    }
+
+    /// <summary>Minta service mengirim OTP maintenance ke Telegram.</summary>
+    private async void OtpButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_pipeClient.IsConnected)
+        {
+            PinHintText.Text = "Agent service belum terhubung.";
+            PinHintText.Foreground = System.Windows.Media.Brushes.OrangeRed;
+            PinHintText.Visibility = Visibility.Visible;
+            AgentLog.Write("Kirim OTP ditolak — pipe ke service belum terhubung");
+            return;
+        }
+
+        OtpButton.IsEnabled = false;
+        OtpButton.Content = "MENGIRIM...";
+        try
+        {
+            await _pipeClient.SendOtpRequestAsync();
+        }
+        finally
+        {
+            OtpButton.IsEnabled = true;
+            OtpButton.Content = "KIRIM OTP KE TELEGRAM";
+        }
+    }
+
+    private void HandleOtpResult(string json)
+    {
+        try
+        {
+            var result = JsonConvert.DeserializeObject<OtpResultPayload>(json);
+            if (result == null) return;
+
+            if (result.Sukses)
+            {
+                PinHintText.Text = "OTP dikirim ke Telegram. Masukkan kodenya di bawah (berlaku 5 menit).";
+                PinHintText.Foreground = System.Windows.Media.Brushes.Green;
+                PinBox.Password = "";
+                PinBox.Focus();
+                AgentLog.Write("OTP berhasil dikirim ke Telegram");
+            }
+            else
+            {
+                PinHintText.Text = result.Pesan ?? "Gagal mengirim OTP.";
+                PinHintText.Foreground = System.Windows.Media.Brushes.OrangeRed;
+                AgentLog.Write($"Kirim OTP gagal: {result.Pesan}");
+            }
+            PinHintText.Visibility = Visibility.Visible;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "OTP result parse error");
         }
     }
 
@@ -513,5 +586,6 @@ public partial class MainWindow : Window
 
     // Payload records
     private record LoginResultPayload(bool Sukses, string? Alasan);
-    private record PinVerifyPayload(bool Sukses);
+    private record PinVerifyPayload(bool Sukses, bool? ViaOtp, string? Pesan);
+    private record OtpResultPayload(bool Sukses, string? Pesan);
 }
