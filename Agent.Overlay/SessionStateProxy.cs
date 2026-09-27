@@ -84,6 +84,7 @@ private readonly ILogger<SessionStateProxy> _logger;
             _durasiDetik = value;
             OnPropertyChanged(nameof(DurasiDetik));
             OnPropertyChanged(nameof(ProgressPercent));
+            RaiseWaktuKategoriNotifikasi();
         }
     }
 
@@ -97,7 +98,23 @@ private readonly ILogger<SessionStateProxy> _logger;
             OnPropertyChanged(nameof(SisaDetik));
             OnPropertyChanged(nameof(CountdownText));
             OnPropertyChanged(nameof(ProgressPercent));
+            RaiseWaktuKategoriNotifikasi();
         }
+    }
+
+    /// <summary>Ambang waktu untuk warna timeline mini panel.</summary>
+    private const double BatasHijau = 60;
+    private const double BatasKuning = 30;
+
+    public bool IsWaktuAman => ProgressPercent >= BatasHijau;
+    public bool IsWaktuSedang => ProgressPercent >= BatasKuning && ProgressPercent < BatasHijau;
+    public bool IsWaktuKritis => ProgressPercent < BatasKuning;
+
+    private void RaiseWaktuKategoriNotifikasi()
+    {
+        OnPropertyChanged(nameof(IsWaktuAman));
+        OnPropertyChanged(nameof(IsWaktuSedang));
+        OnPropertyChanged(nameof(IsWaktuKritis));
     }
 
     public bool IsLocked => Locked;
