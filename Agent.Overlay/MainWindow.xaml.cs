@@ -464,23 +464,10 @@ public partial class MainWindow : Window
         AgentLog.Write("Sesi: window mini di-minimize");
     }
 
-    private bool _stopConfirmArmed;
-    private DateTime _stopConfirmAt;
-
     private async void StopSesiButton_Click(object sender, RoutedEventArgs e)
     {
-        // Konfirmasi dua langkah: klik sekali → status, klik lagi → kirim stop.
-        if (!_stopConfirmArmed || (DateTime.Now - _stopConfirmAt).TotalSeconds > 5)
-        {
-            _stopConfirmArmed = true;
-            _stopConfirmAt = DateTime.Now;
-            MiniStatusText.Text = "Klik STOP SESI sekali lagi untuk konfirmasi...";
-            MiniStatusText.Visibility = Visibility.Visible;
-            AgentLog.Write("Stop sesi: minta konfirmasi (klik kedua)");
-            return;
-        }
-
-        _stopConfirmArmed = false;
+        // Satu klik langsung stop — user bisa menghentikan sesinya sendiri tanpa
+        // langkah konfirmasi tambahan.
         MiniStatusText.Visibility = Visibility.Collapsed;
 
         if (!_pipeClient.IsConnected)
@@ -491,7 +478,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        AgentLog.Write("Kirim StopSessionRequest ke service");
+        AgentLog.Write("Kirim StopSessionRequest ke service (satu klik, tanpa konfirmasi)");
         await _pipeClient.SendStopSessionRequestAsync();
     }
 
