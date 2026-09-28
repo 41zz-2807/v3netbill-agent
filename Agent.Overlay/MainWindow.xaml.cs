@@ -41,11 +41,6 @@ public partial class MainWindow : Window
     private bool _emergencyExit;
     private DispatcherTimer? _countdownTimer;
 
-    // Password yang barusan dikirim ke service. Disimpan supaya bisa langsung
-    // mengisi kolom login setelah server mengonfirmasi, tanpa perlu parse ulang
-    // dari teks pesan.
-    private string _passwordBaruTerakhir = string.Empty;
-
     private const string EmergencyPin = "123456";
     private static readonly string StopFlagPath =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments), "v3netbill-agent-stop.flag");
@@ -68,33 +63,8 @@ public partial class MainWindow : Window
         Closing += OnClosing;
         KeyDown += OnKeyDown; // for technician shortcut
 
-        SetPcLabel();
     }
 
-    /// <summary>
-    /// Subjudul mini panel (gaya "artist" di UI audio player) diisi nama PC dari
-    /// registry yang sama dengan UninstallGuardWindow, supaya teknisi bisa langsung
-    /// tahu PC mana yang sedang aktif tanpa membuka halaman web.
-    /// </summary>
-    private void SetPcLabel()
-    {
-        string? label = null;
-        try
-        {
-            using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
-                @"SOFTWARE\v3Netbill\Agent");
-            var pcId = key?.GetValue("PcId") as string;
-            if (!string.IsNullOrWhiteSpace(pcId)) label = pcId;
-        }
-        catch (Exception ex)
-        {
-            AgentLog.Write(ex, "Baca PcId dari registry gagal");
-        }
-
-        if (string.IsNullOrWhiteSpace(label)) label = _config["Agent:PcId"];
-
-        if (!string.IsNullOrWhiteSpace(label)) PcLabelText.Text = label!;
-    }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
@@ -518,15 +488,15 @@ public partial class MainWindow : Window
     }
 
     // Button click handlers
-    /// <summary>Buka dialog buat/ganti password.</summary>
+    /// <summary>Buka dialog ganti password dari mini window.</summary>
     private void BuatPasswordButton_Click(object sender, RoutedEventArgs e)
     {
-        // Kode diambil dari kolom login supaya tidak diketik dua kali.
-        BuatPasswordKodeBox.Text = KodeTextBox.Text.Trim();
-        BuatPasswordBox.Password = string.Empty;
+        PasswordLamaBox.Password = string.Empty;
+        PasswordBaruBox.Password = string.Empty;
+        PasswordUlangiBox.Password = string.Empty;
         BuatPasswordErrorText.Visibility = Visibility.Collapsed;
         BuatPasswordDialog.Visibility = Visibility.Visible;
-        BuatPasswordKodeBox.Focus();
+        PasswordLamaBox.Focus();
     }
 
     private void BuatPasswordCancelButton_Click(object sender, RoutedEventArgs e)
@@ -537,23 +507,47 @@ public partial class MainWindow : Window
     private void TutupDialogBuatPassword()
     {
         BuatPasswordDialog.Visibility = Visibility.Collapsed;
-        BuatPasswordBox.Password = string.Empty;
+        PasswordLamaBox.Password = string.Empty;
+        PasswordBaruBox.Password = string.Empty;
+        PasswordUlangiBox.Password = string.Empty;
         KodeTextBox.Focus();
     }
 
     private async void BuatPasswordOkButton_Click(object sender, RoutedEventArgs e)
     {
-        string kode = BuatPasswordKodeBox.Text.Trim();
-        string password = BuatPasswordBox.Password.Trim();
-
+        // Kode diambil dari akun yang sedang dipakai sesi ini, jadi tidak perlu
+        // diketik lagi. Password untuk member adalah namanya.
+        // Voucher pakai kode uniknya, member tidak punya kode sehingga memakai
+        // nama. Ini sama dengan cara backend mencari akun dari kode.
+        string kode = _stateProxy.AkunKode ?? _stateProxy.AkunNama;
         if (string.IsNullOrWhiteSpace(kode))
         {
-            TampilkanGalatBuatPassword("Masukkan kode voucher atau member.");
+            TampilkanGalatBuatPassword("Kode akun tidak terbaca. Coba login ulang.");
             return;
         }
-        if (password.Length < 4)
+
+        string lama = PasswordLamaBox.Password;
+        string baru = PasswordBaruBox.Password.Trim();
+        string ulang = PasswordUlangiBox.Password.Trim();
+
+        if (lama.Length == 0)
+        {
+            TampilkanGalatBuatPassword("Isi password lama dulu. default 0000 kalau belum pernah ganti.");
+            return;
+        }
+        if (baru.Length < 4)
         {
             TampilkanGalatBuatPassword("Password baru minimal 4 karakter.");
+            return;
+        }
+        if (baru != ulang)
+        {
+            TampilkanGalatBuatPassword("Ulangi password tidak sama.");
+            return;
+        }
+        if (baru == lama)
+        {
+            TampilkanGalatBuatPassword("Password baru harus berbeda dari yang lama.");
             return;
         }
         if (!_pipeClient.IsConnected)
@@ -564,8 +558,7 @@ public partial class MainWindow : Window
 
         TampilkanGalatBuatPassword("Mengirim ke server...");
         AgentLog.Write($"Kirim create_password ke service: kode='{kode}'");
-        _passwordBaruTerakhir = password;
-        await _pipeClient.SendCreatePasswordRequestAsync(kode, password);
+        await _pipeClient.SendCreatePasswordRequestAsync(kode, lama, baru);
     }
 
     private void TampilkanGalatBuatPassword(string pesan)
@@ -584,12 +577,11 @@ public partial class MainWindow : Window
             if (hasil.Sukses)
             {
                 AgentLog.Write("create_password berhasil");
-                PasswordBox.Password = _passwordBaruTerakhir;
-                _passwordBaruTerakhir = string.Empty;
                 TutupDialogBuatPassword();
-                ErrorText.Text = "Password diganti. Tekan LOGIN untuk masuk.";
-                ErrorText.Foreground = Brushes.MediumSeaGreen;
-                ErrorText.Visibility = Visibility.Visible;
+                // Pesan muncul di mini window, karena di layar sedang berjalan.
+                MiniStatusText.Text = "Password berhasil diganti.";
+                MiniStatusText.Foreground = Brushes.MediumSeaGreen;
+                MiniStatusText.Visibility = Visibility.Visible;
             }
             else
             {

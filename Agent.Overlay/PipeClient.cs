@@ -172,10 +172,10 @@ public class PipeClient : IDisposable
         await SendAsync(new PipeMessage(PipeMessageType.OtpRequest, "{}"), ct);
     }
 
-    /// <summary>Minta service dibuatkan password baru untuk sebuah kode.</summary>
-    public async Task SendCreatePasswordRequestAsync(string kode, string password, CancellationToken ct = default)
+    /// <summary>Minta service mengganti password sebuah kode.</summary>
+    public async Task SendCreatePasswordRequestAsync(string kode, string passwordLama, string password, CancellationToken ct = default)
     {
-        var payload = JsonConvert.SerializeObject(new { kode, password });
+        var payload = JsonConvert.SerializeObject(new { kode, passwordLama, password });
         await SendAsync(new PipeMessage(PipeMessageType.CreatePasswordRequest, payload), ct);
     }
 

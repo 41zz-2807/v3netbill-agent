@@ -220,35 +220,6 @@
                         </Button.Template>
                     </Button>
 
-                    <!-- Ganti password sendiri. Password lama tidak ditanyakan karena
-                         semua akun baru mulai dari password bawaan yang sama. -->
-                    <Button x:Name="BuatPasswordButton"
-                            Content="BUAT / GANTI PASSWORD"
-                            Height="44"
-                            FontSize="13" FontWeight="Bold"
-                            Background="#2A3040"
-                            Foreground="#C6CEDC"
-                            BorderThickness="0"
-                            Cursor="Hand"
-                            Margin="0,10,0,0"
-                            Click="BuatPasswordButton_Click">
-                        <Button.Template>
-                            <ControlTemplate TargetType="Button">
-                                <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="10">
-                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                </Border>
-                                <ControlTemplate.Triggers>
-                                    <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="bd" Property="Background" Value="#3A4256"/>
-                                    </Trigger>
-                                    <Trigger Property="IsPressed" Value="True">
-                                        <Setter TargetName="bd" Property="Background" Value="#232937"/>
-                                    </Trigger>
-                                </ControlTemplate.Triggers>
-                            </ControlTemplate>
-                        </Button.Template>
-                    </Button>
-
                     <TextBlock x:Name="ErrorText" 
                                Text="" 
                                FontSize="13" 
@@ -261,6 +232,8 @@
 
 
             <!-- Dialog buat/ganti password (hidden by default) -->
+            <!-- Dialog ganti password (hidden by default). Tampil dari mini window
+                 saat sesi berjalan, bukan dari layar login. -->
             <Border x:Name="BuatPasswordDialog"
                     Background="#F21A1A22"
                     CornerRadius="16"
@@ -268,28 +241,37 @@
                     Width="380"
                     Visibility="Collapsed">
                 <StackPanel>
-                    <TextBlock Text="BUAT / GANTI PASSWORD"
+                    <TextBlock Text="GANTI PASSWORD"
                                FontSize="16" FontWeight="Bold"
                                Foreground="White"
-                               HorizontalAlignment="Center" Margin="0,0,0,6"/>
-                    <TextBlock Text="Password awal semua akun 0000, jadi tidak perlu password lama."
-                               FontSize="12"
-                               Foreground="#8A93A6"
-                               TextWrapping="Wrap"
-                               HorizontalAlignment="Center"
-                               Margin="0,0,0,16"/>
+                               HorizontalAlignment="Center" Margin="0,0,0,16"/>
 
-                    <TextBlock Text="KODE VOUCHER / MEMBER" Style="{StaticResource FieldCaptionStyle}"/>
-                    <TextBox x:Name="BuatPasswordKodeBox"
-                             Height="44" FontSize="15" MaxLength="24"
-                             VerticalContentAlignment="Center"
-                             Padding="14,0" BorderThickness="1" BorderBrush="#2EFFFFFF"
-                             Background="{StaticResource FieldInsetBrush}"
-                             Foreground="White" CaretBrush="#00D4AA"
-                             Template="{StaticResource PillFieldTemplate}"/>
+                    <TextBlock Text="PASSWORD LAMA" Style="{StaticResource FieldCaptionStyle}"/>
+                    <PasswordBox x:Name="PasswordLamaBox"
+                                 Height="44" FontSize="15" MaxLength="12"
+                                 VerticalContentAlignment="Center"
+                                 Padding="14,0" BorderThickness="1" BorderBrush="#2EFFFFFF"
+                                 Background="{StaticResource FieldInsetBrush}"
+                                 Foreground="White" CaretBrush="#00D4AA"
+                                 Tag="0000"
+                                 Template="{StaticResource PillPasswordTemplate}"/>
+                    <TextBlock x:Name="PasswordLamaHint"
+                               Text="Belum pernah ganti? Isi 0000"
+                               FontSize="10"
+                               Foreground="#6B7A94"
+                               Margin="2,5,0,0"/>
 
-                    <TextBlock Text="PASSWORD BARU" Style="{StaticResource FieldCaptionStyle}" Margin="0,16,0,0"/>
-                    <PasswordBox x:Name="BuatPasswordBox"
+                    <TextBlock Text="PASSWORD BARU" Style="{StaticResource FieldCaptionStyle}" Margin="0,14,0,0"/>
+                    <PasswordBox x:Name="PasswordBaruBox"
+                                 Height="44" FontSize="15" MaxLength="12"
+                                 VerticalContentAlignment="Center"
+                                 Padding="14,0" BorderThickness="1" BorderBrush="#2EFFFFFF"
+                                 Background="{StaticResource FieldInsetBrush}"
+                                 Foreground="White" CaretBrush="#00D4AA"
+                                 Template="{StaticResource PillPasswordTemplate}"/>
+
+                    <TextBlock Text="ULANGI PASSWORD BARU" Style="{StaticResource FieldCaptionStyle}" Margin="0,14,0,0"/>
+                    <PasswordBox x:Name="PasswordUlangiBox"
                                  Height="44" FontSize="15" MaxLength="12"
                                  VerticalContentAlignment="Center"
                                  Padding="14,0" BorderThickness="1" BorderBrush="#2EFFFFFF"
@@ -306,7 +288,7 @@
                                Visibility="Collapsed"/>
 
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,18,0,0">
-                        <Button x:Name="BuatPasswordOkButton" Content="SIMPAN" Width="120" Height="40"
+                        <Button x:Name="BuatPasswordOkButton" Content="GANTI" Width="120" Height="40"
                                 FontSize="13" FontWeight="Bold"
                                 Background="#00D4AA" Foreground="#0C1118" BorderThickness="0"
                                 Margin="0,0,10,0" Cursor="Hand" Click="BuatPasswordOkButton_Click">
@@ -503,12 +485,6 @@
                                            Foreground="#FFFFFF"
                                            TextTrimming="CharacterEllipsis"
                                            Margin="0,2,0,0"/>
-                                <TextBlock x:Name="PcLabelText"
-                                           Text="PC"
-                                           FontSize="12"
-                                           Foreground="#7A8CA8"
-                                           TextTrimming="CharacterEllipsis"
-                                           Margin="0,1,0,0"/>
                             </StackPanel>
                         </Grid>
 
@@ -529,6 +505,37 @@
                                          Style="{StaticResource TimelineStyle}"
                                          Value="{Binding ProgressPercent, Mode=OneWay}"/>
                         </Border>
+
+                        <!-- Ganti password: hanya muncul saat sesi berjalan, jadi
+                             yang menekan memang sedang memakai komputer ini. -->
+                        <Button x:Name="MiniGantiPasswordButton"
+                                Content="GANTI PASSWORD"
+                                FontSize="11"
+                                FontWeight="SemiBold"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                Padding="0"
+                                Cursor="Hand"
+                                HorizontalAlignment="Center"
+                                Margin="0,10,0,0"
+                                Click="BuatPasswordButton_Click">
+                            <Button.Style>
+                                <Style TargetType="Button">
+                                    <Setter Property="Foreground" Value="#6B7A94"/>
+                                    <Style.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter Property="Foreground" Value="#00D4AA"/>
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <ContentPresenter HorizontalAlignment="Center"
+                                                      VerticalAlignment="Center"/>
+                                </ControlTemplate>
+                            </Button.Template>
+                        </Button>
 
                         <!-- Status / pesan error -->
                         <TextBlock x:Name="MiniStatusText"

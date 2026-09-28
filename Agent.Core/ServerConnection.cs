@@ -251,12 +251,12 @@ public sealed class ServerConnection : IAsyncDisposable
     /// Client (overlay) minta dibuatkan password baru untuk sebuah kode.
     /// </summary>
     /// <remarks>
-    /// Password lama sengaja tidak dikirim. Semua akun baru mulai dari password
-    /// bawaan yang sama, jadi orang yang memakai komputer tidak perlu mengingat
-    /// apa pun untuk bisa mengganti passwordnya sendiri.
+    /// Password lama ikut dikirim dan dicocokkan di server, karena yang memakai
+    /// komputer adalah pemilik akun itu sendiri.
     /// </remarks>
     public async Task<CreatePasswordResultPayload?> SendCreatePasswordAsync(
         string kode,
+        string passwordLama,
         string password,
         CancellationToken ct = default)
     {
@@ -268,7 +268,7 @@ public sealed class ServerConnection : IAsyncDisposable
         CreatePasswordResultPayload? hasil = null;
         await _client.EmitAsync(
             AgentEvents.ClientCreatePassword,
-            new object[] { new { pcId = _pcId, kode, password } },
+            new object[] { new { pcId = _pcId, kode, passwordLama, password } },
             response =>
             {
                 // Bentuk ack bisa berupa objek di indeks 0, atau seluruh isi

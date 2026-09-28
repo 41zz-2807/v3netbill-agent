@@ -529,7 +529,7 @@ public class Worker : BackgroundService
                             JsonConvert.SerializeObject(new { sukses = false, pesan = "Belum terhubung ke server." })));
                         break;
                     }
-                    var hasil = await _serverConnection.SendCreatePasswordAsync(req.Kode, req.Password, ct);
+                    var hasil = await _serverConnection.SendCreatePasswordAsync(req.Kode, req.PasswordLama, req.Password, ct);
                     await SendToOverlayAsync(new PipeMessage(
                         PipeMessageType.CreatePasswordResult,
                         JsonConvert.SerializeObject(new
@@ -749,7 +749,7 @@ public class Worker : BackgroundService
     // Payload records
     private record LoginRequestPayload(string Kode, string Password);
 
-    private record CreatePasswordPayload(string Kode, string Password);
+    private record CreatePasswordPayload(string Kode, string PasswordLama, string Password);
     private record PinVerifyRequestPayload(string Pin);
     private record PinVerifyResponse(bool Sukses);
 }
