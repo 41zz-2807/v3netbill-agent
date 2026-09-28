@@ -40,15 +40,7 @@ public partial class MainWindow : Window
     private MemoryStream? _wallpaperStream;
     private bool _emergencyExit;
     private DispatcherTimer? _countdownTimer;
-    // Ukuran window mode mini saat sesi berjalan, sesuai UpdateWindowState.
-    private readonly double _miniWidth = 340;
-    private readonly double _miniHeight = 268;
-
-    // Ukuran window sementara ketika dialog ganti password dibuka. Harus
-    // cukup besar untuk seluruh dialog, kalau tidak bagian bawahnya terpotong
-    // di tepi window dan tombolnya tidak terlihat.
-    private const double DialogW = 400;
-    private const double DialogH = 430;
+    private BuatPasswordDialogWindow? _dialogGantiPassword;
 
     private const string EmergencyPin = "123456";
     private static readonly string StopFlagPath =
@@ -173,6 +165,16 @@ public partial class MainWindow : Window
         {
             Dispatcher.Invoke(() =>
             {
+                // Dialog ganti password milik sesi yang sedang berjalan. Kalau
+                // sesi selesai (waktu habis atau di-stop), tidak ada lagi akun
+                // yang bisa diganti, jadi dialognya ditutup supaya tidak
+                // menggantung di layar tanpa ada yang bisa dilakukan.
+                if (_stateProxy.Locked)
+                {
+                    _dialogGantiPassword?.Close();
+                    _dialogGantiPassword = null;
+                }
+
                 UpdateVisibility();
                 UpdateWindowState();
             });
@@ -447,16 +449,6 @@ public partial class MainWindow : Window
 
     private void OnKeyDown(object sender, KeyEventArgs e)
     {
-        // Jalur keluar untuk dialog ganti password. Tombol BATAL ada di dalam
-        // dialog, tapi kalau dialognya somehow tidak terjangkau, ESC tetap
-        // menutupnya supaya pengguna tidak terkunci.
-        if (e.Key == Key.Escape && BuatPasswordDialog.Visibility == Visibility.Visible)
-        {
-            TutupDialogBuatPassword();
-            e.Handled = true;
-            return;
-        }
-
         // Technician shortcut: Ctrl+Alt+Shift+F12
         if (e.Key == Key.F12 &&
             (Keyboard.Modifiers & ModifierKeys.Control) != 0 &&
@@ -507,106 +499,76 @@ public partial class MainWindow : Window
     }
 
     // Button click handlers
-    /// <summary>Buka dialog ganti password dari mini window.</summary>
+    /// <summary>
+    /// Buka dialog ganti password. Dialog adalah jendela terpisah supaya tidak
+    /// ikut terpotong oleh ukuran mini window (340x268) saat sesi berjalan.
+    /// </summary>
     private void BuatPasswordButton_Click(object sender, RoutedEventArgs e)
     {
-        AgentLog.Write("Tombol GANTI PASSWORD diklik — membuka dialog");
-
-        // Window sedang dalam mode mini (340x268) saat sesi berjalan, dan itu
-        // jauh lebih kecil dari dialog. Tanpa diperbesar, bagian bawah dialog
-        // terpotong di tepi window sehingga kolom ulangan dan tombolnya tidak
-        // terlihat sama sekali.
-        if (BuatPasswordDialog.Visibility != Visibility.Visible)
-        {
-            Width = DialogW;
-            Height = DialogH;
-            Left = SystemParameters.WorkArea.Left + (SystemParameters.WorkArea.Width - Width) / 2;
-            Top = SystemParameters.WorkArea.Top + (SystemParameters.WorkArea.Height - Height) / 2;
-        }
-
-        PasswordLamaBox.Password = string.Empty;
-        PasswordBaruBox.Password = string.Empty;
-        PasswordUlangiBox.Password = string.Empty;
-        BuatPasswordErrorText.Visibility = Visibility.Collapsed;
-        BuatPasswordDialog.Visibility = Visibility.Visible;
-        PasswordLamaBox.Focus();
-    }
-
-    private void BuatPasswordCancelButton_Click(object sender, RoutedEventArgs e)
-    {
-        TutupDialogBuatPassword();
-    }
-
-    private void TutupDialogBuatPassword()
-    {
-        BuatPasswordDialog.Visibility = Visibility.Collapsed;
-        // Kembalikan window ke ukuran mini seperti sebelum dialog dibuka.
-        Width = _miniWidth;
-        Height = _miniHeight;
-        Left = SystemParameters.WorkArea.Right - Width - 16;
-        Top = 16;
-        PasswordLamaBox.Password = string.Empty;
-        PasswordBaruBox.Password = string.Empty;
-        PasswordUlangiBox.Password = string.Empty;
-        KodeTextBox.Focus();
-    }
-
-    private async void BuatPasswordOkButton_Click(object sender, RoutedEventArgs e)
-    {
-        // Kode diambil dari akun yang sedang dipakai sesi ini, jadi tidak perlu
-        // diketik lagi. Password untuk member adalah namanya.
-        // Voucher pakai kode uniknya, member tidak punya kode sehingga memakai
+        // Kode diambil dari akun yang sedang dipakai sesi ini, jadi pengguna
+        // tidak perlu mengetiknya lagi. Password untuk member adalah namanya.
+        // Voucher memakai kode uniknya, member tidak punya kode sehingga memakai
         // nama. Ini sama dengan cara backend mencari akun dari kode.
         string kode = _stateProxy.AkunKode ?? _stateProxy.AkunNama;
         if (string.IsNullOrWhiteSpace(kode))
         {
-            TampilkanGalatBuatPassword("Kode akun tidak terbaca. Coba login ulang.");
+            AgentLog.Write("Ganti password tidak bisa dibuka: kode akun tidak terbaca");
+            MiniStatusText.Text = "Kode akun tidak terbaca. Coba login ulang.";
+            MiniStatusText.Visibility = Visibility.Visible;
             return;
         }
 
-        string lama = PasswordLamaBox.Password;
-        string baru = PasswordBaruBox.Password.Trim();
-        string ulang = PasswordUlangiBox.Password.Trim();
+        AgentLog.Write("Tombol GANTI PASSWORD diklik — membuka dialog");
+        _dialogGantiPassword = new BuatPasswordDialogWindow
+        {
+            Kode = kode,
+            Owner = this,
+            WindowStartupLocation = WindowStartupLocation.CenterScreen,
+        };
+        _dialogGantiPassword.Submit += (_, lama, baru) => KirimGantiPassword(lama, baru);
+        _dialogGantiPassword.ShowDialog();
+        _dialogGantiPassword = null;
+    }
+
+    private async void KirimGantiPassword(string lama, string baru)
+    {
+        var dlg = _dialogGantiPassword;
+        string ulang = dlg?.PasswordUlangi ?? string.Empty;
 
         if (lama.Length == 0)
         {
-            TampilkanGalatBuatPassword("Isi password lama dulu. default 0000 kalau belum pernah ganti.");
+            dlg?.TampilkanGalat("Isi password lama dulu. default 0000 kalau belum pernah ganti.");
             return;
         }
         if (baru.Length < 4)
         {
-            TampilkanGalatBuatPassword("Password baru minimal 4 karakter.");
+            dlg?.TampilkanGalat("Password baru minimal 4 karakter.");
             return;
         }
         if (baru != ulang)
         {
-            TampilkanGalatBuatPassword("Ulangi password tidak sama.");
+            dlg?.TampilkanGalat("Ulangi password tidak sama.");
             return;
         }
         if (baru == lama)
         {
-            TampilkanGalatBuatPassword("Password baru harus berbeda dari yang lama.");
+            dlg?.TampilkanGalat("Password baru harus berbeda dari yang lama.");
             return;
         }
         if (!_pipeClient.IsConnected)
         {
-            TampilkanGalatBuatPassword("Belum tersambung ke service - tunggu beberapa saat lalu coba lagi.");
+            dlg?.TampilkanGalat("Belum tersambung ke service - tunggu beberapa saat lalu coba lagi.");
             return;
         }
 
-        TampilkanGalatBuatPassword("Mengirim ke server...");
-        AgentLog.Write($"Kirim create_password ke service: kode='{kode}'");
-        await _pipeClient.SendCreatePasswordRequestAsync(kode, lama, baru);
-    }
-
-    private void TampilkanGalatBuatPassword(string pesan)
-    {
-        BuatPasswordErrorText.Text = pesan;
-        BuatPasswordErrorText.Visibility = Visibility.Visible;
+        dlg?.TampilkanGalat("Mengirim ke server...");
+        AgentLog.Write("Kirim create_password ke service");
+        await _pipeClient.SendCreatePasswordRequestAsync(dlg?.Kode ?? string.Empty, lama, baru);
     }
 
     private void HandleCreatePasswordResult(string json)
     {
+        var dlg = _dialogGantiPassword;
         try
         {
             var hasil = JsonConvert.DeserializeObject<CreatePasswordResultPayload>(json);
@@ -615,7 +577,7 @@ public partial class MainWindow : Window
             if (hasil.Sukses)
             {
                 AgentLog.Write("create_password berhasil");
-                TutupDialogBuatPassword();
+                dlg?.SelesaiKirim(true);
                 // Pesan muncul di mini window, karena di layar sedang berjalan.
                 MiniStatusText.Text = "Password berhasil diganti.";
                 MiniStatusText.Foreground = Brushes.MediumSeaGreen;
@@ -624,13 +586,15 @@ public partial class MainWindow : Window
             else
             {
                 AgentLog.Write($"create_password gagal: {hasil.Pesan}");
-                TampilkanGalatBuatPassword(hasil.Pesan ?? "Gagal mengganti password.");
+                dlg?.SelesaiKirim(false);
+                dlg?.TampilkanGalat(hasil.Pesan ?? "Gagal mengganti password.");
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Gagal membaca hasil create_password");
-            TampilkanGalatBuatPassword("Gagal membaca jawaban server.");
+            dlg?.SelesaiKirim(false);
+            dlg?.TampilkanGalat("Gagal membaca jawaban server.");
         }
     }
 

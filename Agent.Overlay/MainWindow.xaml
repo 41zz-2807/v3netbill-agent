@@ -21,19 +21,9 @@
         <!-- Meniru box-shadow: inset 2px 5px 10px dari CSS Uiverse. WPF tidak punya
              inner shadow, jadi dipakai gradien yang lebih gelap di atas lalu memudar
              ke bawah. Satu elemen, tanpa Border bersarang. -->
-        <LinearGradientBrush x:Key="FieldInsetBrush" StartPoint="0,0" EndPoint="0,1">
-            <GradientStop Color="#33000000" Offset="0"/>
-            <GradientStop Color="#1A000000" Offset="0.30"/>
-            <GradientStop Color="#0A000000" Offset="0.70"/>
-            <GradientStop Color="#00000000" Offset="1"/>
-        </LinearGradientBrush>
 
-        <Style x:Key="FieldCaptionStyle" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#8A93A6"/>
-            <Setter Property="FontSize" Value="11"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Margin" Value="0,0,0,7"/>
-        </Style>
+
+
 
         <!-- Timeline mini panel. Warnanya ikut sisa waktu: >60% hijau, 30-60% kuning,
              <=30% merah. Ketiganya mutually exclusive, jadi tidak saling tumpang tindih. -->
@@ -74,25 +64,7 @@
             </ControlTemplate.Triggers>
         </ControlTemplate>
 
-        <ControlTemplate x:Key="PillPasswordTemplate" TargetType="PasswordBox">
-            <Border x:Name="bd"
-                    Background="{TemplateBinding Background}"
-                    BorderBrush="{TemplateBinding BorderBrush}"
-                    BorderThickness="{TemplateBinding BorderThickness}"
-                    CornerRadius="23">
-                <ScrollViewer x:Name="PART_ContentHost"
-                              VerticalAlignment="Center"
-                              Margin="{TemplateBinding Padding}"
-                              Focusable="False"
-                              HorizontalScrollBarVisibility="Hidden"
-                              VerticalScrollBarVisibility="Hidden"/>
-            </Border>
-            <ControlTemplate.Triggers>
-                <Trigger Property="IsKeyboardFocusWithin" Value="True">
-                    <Setter TargetName="bd" Property="BorderBrush" Value="#00D4AA"/>
-                </Trigger>
-            </ControlTemplate.Triggers>
-        </ControlTemplate>
+
     </Window.Resources>
 
     <Grid x:Name="RootGrid">
@@ -490,109 +462,6 @@
                 </ControlTemplate>
             </Button.Template>
         </Button>
-        <Border x:Name="BuatPasswordDialog"
-                Background="#F21A1A22"
-                CornerRadius="16"
-                Padding="28,24"
-                Width="380"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
-                Visibility="Collapsed">
-            <StackPanel>
-                <Grid Margin="0,0,0,14">
-                    <TextBlock Text="GANTI PASSWORD"
-                               FontSize="16" FontWeight="Bold"
-                               Foreground="White"
-                               VerticalAlignment="Center"/>
-                    <Button x:Name="BuatPasswordCloseButton"
-                            Content="&#x2715;"
-                            Width="26" Height="26" FontSize="13" FontWeight="Bold"
-                            Background="#2A3040" Foreground="#C6CEDC"
-                            BorderThickness="0" Cursor="Hand"
-                            HorizontalAlignment="Right" VerticalAlignment="Center"
-                            ToolTip="Tutup (Esc)"
-                            Click="BuatPasswordCancelButton_Click"/>
-                </Grid>
-
-                <TextBlock Text="PASSWORD LAMA" Style="{StaticResource FieldCaptionStyle}"/>
-                <PasswordBox x:Name="PasswordLamaBox"
-                             Height="44" FontSize="15" MaxLength="12"
-                             VerticalContentAlignment="Center"
-                             Padding="14,0" BorderThickness="1" BorderBrush="#2EFFFFFF"
-                             Background="{StaticResource FieldInsetBrush}"
-                             Foreground="White" CaretBrush="#00D4AA"
-                             Tag="0000"
-                             Template="{StaticResource PillPasswordTemplate}"/>
-                <TextBlock x:Name="PasswordLamaHint"
-                           Text="Belum pernah ganti? Isi 0000"
-                           FontSize="10"
-                           Foreground="#6B7A94"
-                           Margin="2,5,0,0"/>
-
-                <TextBlock Text="PASSWORD BARU" Style="{StaticResource FieldCaptionStyle}" Margin="0,14,0,0"/>
-                <PasswordBox x:Name="PasswordBaruBox"
-                             Height="44" FontSize="15" MaxLength="12"
-                             VerticalContentAlignment="Center"
-                             Padding="14,0" BorderThickness="1" BorderBrush="#2EFFFFFF"
-                             Background="{StaticResource FieldInsetBrush}"
-                             Foreground="White" CaretBrush="#00D4AA"
-                             Template="{StaticResource PillPasswordTemplate}"/>
-
-                <TextBlock Text="ULANGI PASSWORD BARU" Style="{StaticResource FieldCaptionStyle}" Margin="0,14,0,0"/>
-                <PasswordBox x:Name="PasswordUlangiBox"
-                             Height="44" FontSize="15" MaxLength="12"
-                             VerticalContentAlignment="Center"
-                             Padding="14,0" BorderThickness="1" BorderBrush="#2EFFFFFF"
-                             Background="{StaticResource FieldInsetBrush}"
-                             Foreground="White" CaretBrush="#00D4AA"
-                             Template="{StaticResource PillPasswordTemplate}"/>
-
-                <TextBlock x:Name="BuatPasswordErrorText"
-                           Text=""
-                           FontSize="12"
-                           Foreground="#FF6B6B"
-                           TextWrapping="Wrap"
-                           Margin="0,12,0,0"
-                           Visibility="Collapsed"/>
-
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,18,0,0">
-                    <Button x:Name="BuatPasswordOkButton" Content="GANTI" Width="120" Height="40"
-                            FontSize="13" FontWeight="Bold"
-                            Background="#00D4AA" Foreground="#0C1118" BorderThickness="0"
-                            Margin="0,0,10,0" Cursor="Hand" Click="BuatPasswordOkButton_Click">
-                        <Button.Template>
-                            <ControlTemplate TargetType="Button">
-                                <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="8">
-                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                </Border>
-                                <ControlTemplate.Triggers>
-                                    <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="bd" Property="Background" Value="#00E8BB"/>
-                                    </Trigger>
-                                </ControlTemplate.Triggers>
-                            </ControlTemplate>
-                        </Button.Template>
-                    </Button>
-                    <Button x:Name="BuatPasswordCancelButton" Content="BATAL" Width="120" Height="40"
-                            FontSize="13" FontWeight="Bold"
-                            Background="#2A3040" Foreground="#C6CEDC" BorderThickness="0"
-                            Cursor="Hand" Click="BuatPasswordCancelButton_Click">
-                        <Button.Template>
-                            <ControlTemplate TargetType="Button">
-                                <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="8">
-                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                </Border>
-                                <ControlTemplate.Triggers>
-                                    <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="bd" Property="Background" Value="#3A4256"/>
-                                    </Trigger>
-                                </ControlTemplate.Triggers>
-                            </ControlTemplate>
-                        </Button.Template>
-                    </Button>
-                </StackPanel>
-            </StackPanel>
-        </Border>
 
     </Grid>
 </Window>
