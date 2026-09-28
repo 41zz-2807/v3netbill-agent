@@ -33,7 +33,7 @@
          Banner dialog installer sengaja tidak dikustomisasi: cara WixVariable yang
          lazim dipakai WiX v3 sudah ditolak WiX v4 dengan WIX0005 di semua posisi
          penempatan yang dicoba, dan banner hanya soal tampilan. -->
-    <Icon Id="V3NetbillIcon" SourceFile="..\Agent.Overlay\app.ico" />
+    <Icon Id="V3NetbillIcon" SourceFile="Agent.Overlay\app.ico" />
 
     <MajorUpgrade DowngradeErrorMessage="Versi yang lebih baru sudah terpasang."
                   Schedule="afterInstallInitialize" />
