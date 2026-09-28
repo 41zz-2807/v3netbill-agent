@@ -33,6 +33,12 @@ public sealed class ServerConnection : IAsyncDisposable
     public const double HEARTBEAT_INTERVAL_DETIK = 15.0;
     public const string SESSION_NAMESPACE = "/session";
 
+    /// <summary>
+    /// Batas menunggu balasan ack dari server. Satuannya milidetik karena itu
+    /// yang dipakai CancellationTokenSource.CancelAfter.
+    /// </summary>
+    private const int ACK_TIMEOUT_MILIDETIK = 10_000;
+
     private readonly SocketIO _client;
     private readonly ILogger _logger;
     private readonly string _pcId;
@@ -263,23 +269,39 @@ public sealed class ServerConnection : IAsyncDisposable
         if (!_client.Connected) return null;
 
         // SocketIOClient 4.x tidak punya EmitWithAckAsync. Ack diambil lewat
-        // overload EmitAsync yang menerima callback, jadi jawabannya ditahan di
-        // variabel luar lalu dibaca setelah EmitAsync selesai.
-        CreatePasswordResultPayload? hasil = null;
+        // overload EmitAsync yang menerima callback.
+        //
+        // PENTING: await EmitAsync(...) hanya menunggu paket terkirim, TIDAK
+        // menunggu balasan. Callback dipanggil sekitar setengah detik kemudian,
+        // jadi kalau hasilnya langsung dibaca setelah await, nilainya selalu
+        // null. Karena itu balasan ditunggu lewat TaskCompletionSource.
+        var tcs = new TaskCompletionSource<CreatePasswordResultPayload?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
         await _client.EmitAsync(
             AgentEvents.ClientCreatePassword,
             new object[] { new { pcId = _pcId, kode, passwordLama, password } },
             response =>
             {
-                // Bentuk ack bisa berupa objek di indeks 0, atau seluruh isi
-                // message. Dua-duanya dicoba supaya tidak bergantung pada
-                // bentuk persis yang dikirim NestJS.
-                hasil = BacaAck(response);
+                tcs.TrySetResult(BacaAck(response));
                 return Task.CompletedTask;
             },
             ct);
 
-        return hasil;
+        // PENTING: overload CancelAfter(int) satuannya MILIDETIK. dalam
+        // milidetik membuat balasan dibatalkan sebelum sempat datang, dan
+        // hasilnya null tanpa ada pesan apa pun.
+        using var batasWaktu = new CancellationTokenSource(ACK_TIMEOUT_MILIDETIK);
+        try
+        {
+            using var gabung = CancellationTokenSource.CreateLinkedTokenSource(ct, batasWaktu.Token);
+            return await tcs.Task.WaitAsync(gabung.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            AgentLog.Write("create_password: tidak ada balasan server sebelum batas waktu");
+            return null;
+        }
     }
 
     /// <summary>Baca balasan ack dari server.</summary>
