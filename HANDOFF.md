@@ -1,5 +1,11 @@
 # HANDOFF — v3Netbill Agent
 
+> ⚠️ **Snapshot histori era versi 1.0.9.0 — bukan status terkini.** Agent sudah
+> berkembang jauh di belakang dokumen ini. Untuk aturan kerja, status fase, dan
+> pelajaran proses yang berlaku sekarang, baca **`AGENTS.md` di repo `frontend`**.
+>
+> Dokumen ini tetap berguna sebagai catatan **kenapa** tiap versi agent berubah.
+>
 > Dokumen serah-terima untuk sesi berikutnya. **Versi: 1.0.9.0** (commit `86a4b87`).
 >
 > Repo agent: `/home/warnet/docker/v3netbill/v3NetbillAgent` (git, push ke `main` → CI otomatis).
