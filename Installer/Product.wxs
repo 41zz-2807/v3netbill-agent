@@ -32,10 +32,6 @@
     <!-- Ikon produk: dipakai untuk ikon MSI di Explorer/Add-Remove Programs. -->
     <Icon Id="V3NetbillIcon" SourceFile="..\Agent.Overlay\app.ico" />
 
-    <!-- Banner 370x44, mengikuti ukuran yang diminta WixUI_Bmp_Banner.
-         Background gelap, bukan putih, supaya logo biru tetap kontras. -->
-    <ui:WixVariable Id="WixUIBannerBmp" Value="V3NetbillBanner.bmp" Type="string" />
-
     <MajorUpgrade DowngradeErrorMessage="Versi yang lebih baru sudah terpasang."
                   Schedule="afterInstallInitialize" />
 
@@ -196,6 +192,12 @@
     <!-- ===== Shortcuts (start menu): shortcut "Uninstall v3Netbill Agent" di
          buat untuk kemudahan; tetap melewati verifikasi PIN (custom action). ===== -->
   </Package>
+
+  <!-- Banner 370x44 untuk dialog installer, mengikuti ukuran yang diminta
+       WixUI_Bmp_Banner. Background gelap supaya logo biru tetap kontras.
+       Harus di luar <Package>: WiX v4 menolak anak WixVariable di sana. -->
+  <ui:WixVariable Id="WixUIBannerBmp" Value="V3NetbillBanner.bmp" Type="string" />
+
 
     <!-- ===== UI: dialog config + override sequence WixUI_InstallDir ===== -->
     <!-- Fragment 1: definisi dialog konfigurasi server -->
