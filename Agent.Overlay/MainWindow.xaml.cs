@@ -491,6 +491,7 @@ public partial class MainWindow : Window
     /// <summary>Buka dialog ganti password dari mini window.</summary>
     private void BuatPasswordButton_Click(object sender, RoutedEventArgs e)
     {
+        AgentLog.Write("Tombol GANTI PASSWORD diklik — membuka dialog");
         PasswordLamaBox.Password = string.Empty;
         PasswordBaruBox.Password = string.Empty;
         PasswordUlangiBox.Password = string.Empty;
