@@ -499,10 +499,20 @@
                     VerticalAlignment="Center"
                 Visibility="Collapsed">
             <StackPanel>
-                <TextBlock Text="GANTI PASSWORD"
-                           FontSize="16" FontWeight="Bold"
-                           Foreground="White"
-                           HorizontalAlignment="Center" Margin="0,0,0,16"/>
+                <Grid Margin="0,0,0,14">
+                    <TextBlock Text="GANTI PASSWORD"
+                               FontSize="16" FontWeight="Bold"
+                               Foreground="White"
+                               VerticalAlignment="Center"/>
+                    <Button x:Name="BuatPasswordCloseButton"
+                            Content="&#x2715;"
+                            Width="26" Height="26" FontSize="13" FontWeight="Bold"
+                            Background="#2A3040" Foreground="#C6CEDC"
+                            BorderThickness="0" Cursor="Hand"
+                            HorizontalAlignment="Right" VerticalAlignment="Center"
+                            ToolTip="Tutup (Esc)"
+                            Click="BuatPasswordCancelButton_Click"/>
+                </Grid>
 
                 <TextBlock Text="PASSWORD LAMA" Style="{StaticResource FieldCaptionStyle}"/>
                 <PasswordBox x:Name="PasswordLamaBox"

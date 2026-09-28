@@ -40,6 +40,15 @@ public partial class MainWindow : Window
     private MemoryStream? _wallpaperStream;
     private bool _emergencyExit;
     private DispatcherTimer? _countdownTimer;
+    // Ukuran window mode mini saat sesi berjalan, sesuai UpdateWindowState.
+    private readonly double _miniWidth = 340;
+    private readonly double _miniHeight = 268;
+
+    // Ukuran window sementara ketika dialog ganti password dibuka. Harus
+    // cukup besar untuk seluruh dialog, kalau tidak bagian bawahnya terpotong
+    // di tepi window dan tombolnya tidak terlihat.
+    private const double DialogW = 400;
+    private const double DialogH = 430;
 
     private const string EmergencyPin = "123456";
     private static readonly string StopFlagPath =
@@ -438,6 +447,16 @@ public partial class MainWindow : Window
 
     private void OnKeyDown(object sender, KeyEventArgs e)
     {
+        // Jalur keluar untuk dialog ganti password. Tombol BATAL ada di dalam
+        // dialog, tapi kalau dialognya somehow tidak terjangkau, ESC tetap
+        // menutupnya supaya pengguna tidak terkunci.
+        if (e.Key == Key.Escape && BuatPasswordDialog.Visibility == Visibility.Visible)
+        {
+            TutupDialogBuatPassword();
+            e.Handled = true;
+            return;
+        }
+
         // Technician shortcut: Ctrl+Alt+Shift+F12
         if (e.Key == Key.F12 &&
             (Keyboard.Modifiers & ModifierKeys.Control) != 0 &&
@@ -492,6 +511,19 @@ public partial class MainWindow : Window
     private void BuatPasswordButton_Click(object sender, RoutedEventArgs e)
     {
         AgentLog.Write("Tombol GANTI PASSWORD diklik — membuka dialog");
+
+        // Window sedang dalam mode mini (340x268) saat sesi berjalan, dan itu
+        // jauh lebih kecil dari dialog. Tanpa diperbesar, bagian bawah dialog
+        // terpotong di tepi window sehingga kolom ulangan dan tombolnya tidak
+        // terlihat sama sekali.
+        if (BuatPasswordDialog.Visibility != Visibility.Visible)
+        {
+            Width = DialogW;
+            Height = DialogH;
+            Left = SystemParameters.WorkArea.Left + (SystemParameters.WorkArea.Width - Width) / 2;
+            Top = SystemParameters.WorkArea.Top + (SystemParameters.WorkArea.Height - Height) / 2;
+        }
+
         PasswordLamaBox.Password = string.Empty;
         PasswordBaruBox.Password = string.Empty;
         PasswordUlangiBox.Password = string.Empty;
@@ -508,6 +540,11 @@ public partial class MainWindow : Window
     private void TutupDialogBuatPassword()
     {
         BuatPasswordDialog.Visibility = Visibility.Collapsed;
+        // Kembalikan window ke ukuran mini seperti sebelum dialog dibuka.
+        Width = _miniWidth;
+        Height = _miniHeight;
+        Left = SystemParameters.WorkArea.Right - Width - 16;
+        Top = 16;
         PasswordLamaBox.Password = string.Empty;
         PasswordBaruBox.Password = string.Empty;
         PasswordUlangiBox.Password = string.Empty;
