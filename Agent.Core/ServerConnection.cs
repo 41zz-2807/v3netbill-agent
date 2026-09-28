@@ -282,20 +282,33 @@ public sealed class ServerConnection : IAsyncDisposable
         return hasil;
     }
 
-    /// <summary>Baca balasan ack, coba bentuk objek-indeks-0 lalu seluruh message.</summary>
+    /// <summary>Baca balasan ack dari server.</summary>
+    /// <remarks>
+    /// Argumen ack dari NestJS adalah objek, bukan string. Karena itu
+    /// <c>GetValue&lt;string&gt;(0)</c> melempar JsonException dan tidak pernah
+    /// sampai ke cabang fallback. Jawaban yang dikembalikan objek itu
+    /// { success: true } tanpa message, dan karena readers tidak punya isinya,
+    /// hasil sukses maupun gagal sama-sama terlihat sebagai kegagalan.
+    /// <para>
+    /// <c>RawText</c> juga tidak bisa dipakai: isinya berbentuk larik
+    /// [{ ... }], sedangkan yang dibutuhkan objek tunggal.
+    /// </para>
+    /// </remarks>
     private static CreatePasswordResultPayload? BacaAck(IDataMessage? response)
     {
         if (response == null) return null;
         try
         {
-            var json = response.GetValue<string>(0);
-            if (string.IsNullOrWhiteSpace(json)) json = response.RawText;
+            var json = response.GetValue<JsonElement>(0).GetRawText();
             return string.IsNullOrWhiteSpace(json)
                 ? null
                 : JsonSerializer.Deserialize<CreatePasswordResultPayload>(json);
         }
-        catch (JsonException)
+        catch (Exception ex)
         {
+            // Jangan diam: tanpa baris ini, kegagalan baca ack sama sekali
+            // tidak terlihat dan gejalanya hanya "gagal" generik.
+            AgentLog.Write($"BacaAck gagal: {ex.GetType().Name} - {ex.Message}");
             return null;
         }
     }
