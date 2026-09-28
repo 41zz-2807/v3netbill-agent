@@ -42,6 +42,10 @@ public partial class MainWindow : Window
     private DispatcherTimer? _countdownTimer;
     private BuatPasswordDialogWindow? _dialogGantiPassword;
 
+    // PIN bypass cadangan. Dipakai HANYA kalau admin belum menyetel PIN bypass
+    // di halaman Pengaturan, karena hash yang diset di server tidak ada di PC
+    // ini. Kalau admin sudah menyetelnya, hash-nya yang dipakai dan PIN ini
+    // tidak berlaku lagi.
     private const string EmergencyPin = "123456";
     private static readonly string StopFlagPath =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments), "v3netbill-agent-stop.flag");
@@ -630,8 +634,9 @@ public partial class MainWindow : Window
         string pin = PinBox.Password;
         if (string.IsNullOrWhiteSpace(pin)) return;
 
-        // PIN darurat diverifikasi LOKAL dulu (tidak butuh pipe/backend).
-        if (pin == EmergencyPin)
+        // PIN bypass diverifikasi LOKAL dulu (tidak butuh pipe/backend), supaya
+        // masih bisa dipakai ketika server mati.
+        if (PinBypassTepat(pin))
         {
             PinHintText.Text = "PIN darurat benar. Klik STOP AGENT untuk berhenti (mode maintenance).";
             PinHintText.Visibility = Visibility.Visible;
@@ -644,6 +649,46 @@ public partial class MainWindow : Window
         PinHintText.Visibility = Visibility.Collapsed;
         StopAgentButton.Visibility = Visibility.Collapsed;
         await _pipeClient.SendPinVerifyRequestAsync(pin);
+    }
+
+    /// <summary>
+    /// Cek PIN bypass: kalau admin sudah menyetel PIN di Pengaturan, hash-nya
+    /// didorong ke PC ini dan dicocokkan dengan bcrypt. Kalau belum diset,
+    /// dipakai PIN emergency bawaan.
+    /// </summary>
+    private static bool PinBypassTepat(string pin)
+    {
+        var hash = BacaHashPinBypass();
+        if (string.IsNullOrWhiteSpace(hash))
+        {
+            return pin == EmergencyPin;
+        }
+
+        try
+        {
+            return BCrypt.Net.BCrypt.Verify(pin, hash);
+        }
+        catch (Exception ex)
+        {
+            // Hash rusak di registry jangan membuat bypass gagal diam-diam.
+            AgentLog.Write($"Hash PIN bypass tidak bisa dibaca ({ex.GetType().Name}) — pakai PIN emergency");
+            return pin == EmergencyPin;
+        }
+    }
+
+    /// <summary>Baca hash bcrypt PIN bypass dari registry (dikosongkan = belum diset).</summary>
+    private static string BacaHashPinBypass()
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"Software\v3Netbill\Agent");
+            return key?.GetValue("BypassPinHash") as string ?? string.Empty;
+        }
+        catch (Exception ex)
+        {
+            AgentLog.Write($"Gagal baca hash PIN bypass dari registry: {ex.Message}");
+            return string.Empty;
+        }
     }
 
     private void StopAgentButton_Click(object sender, RoutedEventArgs e)

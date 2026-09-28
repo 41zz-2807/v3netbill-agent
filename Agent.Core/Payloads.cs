@@ -99,6 +99,20 @@ public sealed class OtpConfigPayload
     public string? ChatId { get; set; }
 }
 
+/// <summary>
+/// Hash PIN bypass/maintenance yang didorong server lewat <c>agent:bypass_config</c>.
+/// </summary>
+/// <remarks>
+/// Yang dikirim hanya hash-nya, bukan PIN aslinya, supaya client bisa
+/// memverifikasi sendiri tanpa server. Kosong berarti PIN belum diset di
+/// Pengaturan dan client memakai PIN emergency bawaan.
+/// </remarks>
+public sealed class BypassConfigPayload
+{
+    [JsonPropertyName("hash")]
+    public string? Hash { get; set; }
+}
+
 /// <summary>Balasan ack <c>client:create_password</c> dari server.</summary>
 /// <remarks>
 /// Mengikuti <see cref="ClientLoginResultPayload"/>: nama C# untuk pembaca di

@@ -12,6 +12,9 @@
   <ItemGroup>
     <PackageReference Include="SocketIOClient" Version="4.0.5" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.3" />
+    <!-- Verifikasi hash PIN bypass secara lokal di PC, supaya bypass tetap
+         bisa dipakai saat server mati. -->
+    <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
   </ItemGroup>
 
 </Project>

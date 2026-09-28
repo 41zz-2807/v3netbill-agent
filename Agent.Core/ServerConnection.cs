@@ -75,6 +75,9 @@ public sealed class ServerConnection : IAsyncDisposable
     /// <summary>Server mendorong konfigurasi OTP Telegram baru.</summary>
     public event EventHandler<OtpConfigEventArgs>? OtpConfigReceived;
 
+    /// <summary>Server mendorong hash PIN bypass/maintenance baru.</summary>
+    public event EventHandler<BypassConfigEventArgs>? BypassConfigReceived;
+
     public bool IsConnected => _client.Connected;
 
     /// <summary>Buat koneksi baru. Belum connect sampai <see cref="ConnectAsync"/> dipanggil.</summary>
@@ -162,6 +165,16 @@ public sealed class ServerConnection : IAsyncDisposable
             if (payload != null)
             {
                 OtpConfigReceived?.Invoke(this, new OtpConfigEventArgs(payload.BotToken ?? "", payload.ChatId ?? ""));
+            }
+            return Task.CompletedTask;
+        });
+
+        _client.On("agent:bypass_config", ctx =>
+        {
+            var payload = ctx.GetValue<BypassConfigPayload>(0);
+            if (payload != null)
+            {
+                BypassConfigReceived?.Invoke(this, new BypassConfigEventArgs(payload.Hash ?? ""));
             }
             return Task.CompletedTask;
         });
@@ -466,6 +479,15 @@ public sealed class ServerLinkEventArgs : EventArgs
 
     /// <summary>Alasan putusnya koneksi (hanya diisi saat Connected=false).</summary>
     public string? Reason { get; }
+}
+
+/// <summary>Hash PIN bypass yang dikirim server.</summary>
+public sealed class BypassConfigEventArgs : EventArgs
+{
+    public BypassConfigEventArgs(string hash) => Hash = hash;
+
+    /// <summary>Hash bcrypt PIN bypass. Kosong = kembali ke PIN emergency bawaan.</summary>
+    public string Hash { get; }
 }
 
 public sealed class OtpConfigEventArgs : EventArgs

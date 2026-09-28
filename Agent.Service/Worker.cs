@@ -115,6 +115,7 @@ public class Worker : BackgroundService
         _serverConnection.AdminShutdownReceived += OnAdminShutdown;
         _serverConnection.ServerLinkChanged += OnServerLinkChanged;
         _serverConnection.OtpConfigReceived += OnOtpConfigReceived;
+        _serverConnection.BypassConfigReceived += OnBypassConfigReceived;
 
         // Supervisor koneksi. SocketIOClient 4.x hanya mencoba retry SELAMA
         // ConnectAsync() masih berjalan (ReconnectionAttempts=30); begitu koneksi
@@ -303,6 +304,37 @@ public class Worker : BackgroundService
     }
 
     /// <summary>Server mendorong config OTP baru → simpan ke registry PC (offline).</summary>
+    /// <summary>
+    /// Simpan hash PIN bypass yang didorong server ke registry, supaya overlay
+    /// bisa memverifikasi PIN secara lokal tanpa perlu server.
+    /// </summary>
+    private void OnBypassConfigReceived(object? sender, BypassConfigEventArgs e)
+    {
+        try
+        {
+            using var key = Registry.LocalMachine.CreateSubKey(@"Software\v3Netbill\Agent", true);
+            if (key == null)
+            {
+                _logger.LogWarning("Registry HKLM tidak bisa dibuka — PIN bypass tidak disimpan");
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(e.Hash))
+            {
+                key.DeleteValue("BypassPinHash", false);
+                AgentLog.Write("PIN bypass dikosongkan dari server — kembali ke PIN emergency bawaan");
+                return;
+            }
+
+            key.SetValue("BypassPinHash", e.Hash, RegistryValueKind.String);
+            AgentLog.Write("Hash PIN bypass diterima dari server — disimpan ke registry");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Gagal menyimpan hash PIN bypass");
+        }
+    }
+
     private void OnOtpConfigReceived(object? sender, OtpConfigEventArgs e)
     {
         _otp.SimpanConfig(e.BotToken, e.ChatId);
