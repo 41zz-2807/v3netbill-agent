@@ -43,35 +43,118 @@ for /f "tokens=2,*" %%A in ('reg query "HKLM\Software\v3Netbill\Agent" /v Server
 for /f "tokens=2,*" %%A in ('reg query "HKLM\Software\v3Netbill\Agent" /v PcId       2^>nul ^| find "REG_SZ"') do set "V3_PCID=%%B"
 for /f "tokens=2,*" %%A in ('reg query "HKLM\Software\v3Netbill\Agent" /v AgentToken 2^>nul ^| find "REG_SZ"') do set "V3_TOKEN=%%B"
 
-if not defined V3_SERVERURL goto :no_registry
-if not defined V3_PCID      goto :no_registry
-if not defined V3_TOKEN     goto :no_registry
+if not defined V3_SERVERURL set "V3_SERVERURL=http://localhost:3000"
+if not defined V3_PCID      set "V3_PCID="
+if not defined V3_TOKEN     set "V3_TOKEN="
 goto :pin_step
-
-:no_registry
-echo [STOP] Identitas PC tidak ditemukan di registry.
-echo.
-echo   Key : HKLM\Software\v3Netbill\Agent
-echo   Isi : ServerUrl, PcId, AgentToken
-echo.
-echo   Tanpa identitas ini PIN tidak bisa diverifikasi ke server,
-echo   jadi service TIDAK disentuh dan billing tetap berjalan.
-echo.
-echo   Install ulang versi terbaru lebih dulu supaya registry
-echo   ditulis, lalu uninstall lewat Control Panel.
-echo.
-pause
-exit /b 1
 
 :: ============================================================
 ::  LANGKAH 2 - Minta PIN (tersembunyi) lalu verifikasi ke server
 ::  Dilakukan SEBELUM service dihentikan.
 :: ============================================================
 :pin_step
+:: Registry boleh kosong: versi agent yang sudah pernah di-uninstall script
+:: sebelumnya bisa saja sudah menghapus key itu. Kalau begitu operator
+:: diminta mengisi sendiri, dan kalau server tidak terjangkau script Offer
+:: URL alternatif. Yang tidak boleh terjadi adalah script buntu.
+if not defined V3_PCID  (
+  echo [i] PcId tidak ada di registry.
+  set /p "V3_PCID=Masukkan PC ID  : "
+)
+if not defined V3_TOKEN (
+  echo [i] AgentToken tidak ada di registry.
+  set /p "V3_TOKEN=Masukkan Agent Token: "
+)
+if not defined V3_PCID  goto :abort_manual
+if not defined V3_TOKEN goto :abort_manual
+
+call :verify_pin
+if "%PIN_RESULT%"=="0" (
+  echo.
+  echo [OK] PIN benar. Lanjut uninstall.
+  goto :after_pin
+)
+if "%PIN_RESULT%"=="4" goto :server_unreachable
+if "%PIN_RESULT%"=="6" goto :server_unreachable
+goto :pin_rejected
+
+:server_unreachable
+echo.
+echo [i] Server di registry tidak bisa dihubungi: %V3_SERVERURL%
+set /p "V3_SERVERURL=Masukkan URL server yang benar: "
+if not defined V3_SERVERURL (
+  echo URL kosong. Batal.
+  goto :abort_manual
+)
+call :verify_pin
+if "%PIN_RESULT%"=="0" (
+  echo.
+  echo [OK] PIN benar. Lanjut uninstall.
+  goto :after_pin
+)
+goto :pin_rejected
+
+:pin_rejected
+echo.
+if "%PIN_RESULT%"=="5" (
+  echo [STOP] PIN kosong. Uninstall dibatalkan.
+  goto :abort
+)
+if "%PIN_RESULT%"=="2" (
+  echo [STOP] PIN salah. Uninstall dibatalkan.
+  goto :abort
+)
+if "%PIN_RESULT%"=="3" (
+  echo [STOP] PIN Uninstall belum pernah diset di halaman Pengaturan.
+  echo        Set dulu di web: Settings - PIN Uninstall.
+  goto :abort
+)
+if "%PIN_RESULT%"=="6" (
+  echo [STOP] Server menolak PcId atau AgentToken ini.
+  echo        Pastikan keduanya sama dengan data PC di web.
+  goto :abort
+)
+if "%PIN_RESULT%"=="4" (
+  echo [STOP] Server tetap tidak bisa dihubungi, jadi PIN tidak terverifikasi.
+  echo        Uninstall dibatalkan dan service TIDAK dihentikan.
+  echo.
+  echo        Untuk uninstall paksa, jalankan dari prompt Admin:
+  echo          sc stop v3NetbillAgent
+  echo          sc delete v3NetbillAgent
+  echo        lalu hapus folder %ProgramFiles%\v3NetbillAgent
+  goto :abort
+)
+echo [STOP] Verifikasi PIN gagal dengan kode %PIN_RESULT%. Uninstall dibatalkan.
+goto :abort
+
+:abort_manual
+echo.
+echo Service TIDAK dihentikan. Billing berjalan seperti biasa.
+echo.
+echo Kalau registry agent sudah hilang, uninstall tidak bisa diverifikasi.
+echo Install ulang MSI lebih dulu supaya PcId dan AgentToken terisi,
+echo atau jalankan perintah hapus manual yang tertulis di README.
+echo.
+pause
+exit /b 1
+
+:: --- Helper: verifikasi PIN, hasil di PIN_RESULT ---
+:: PIN sudah diinput sekali di V3_PIN, jadi saat operator mengganti URL
+:: server karena tidak terjangkau, PIN tidak diminta ulang.
+:verify_pin
+if not defined V3_PIN (
+  echo.
+  set /p "V3_PIN=Masukkan PIN Uninstall: "
+)
+if not defined V3_PIN (
+  set "PIN_RESULT=5"
+  exit /b 0
+)
+set "V3_PINSENT=%V3_PIN%"
+set "V3_PIN="
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ErrorActionPreference='Stop';" ^
-  "$pin=Read-Host 'Masukkan PIN Uninstall' -AsSecureString;" ^
-  "$pin=[System.Net.NetworkCredential]::new('', $pin).Password;" ^
+  "$pin=$env:V3_PINSENT;" ^
   "if([string]::IsNullOrWhiteSpace($pin)){Write-Host 'PIN_EMPTY';exit 5};" ^
   "try {" ^
   "  $body=@{pcId=$env:V3_PCID;agentToken=$env:V3_TOKEN;pin=$pin}|ConvertTo-Json -Compress;" ^
@@ -89,44 +172,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "  Write-Host 'PIN_UNREACHABLE';exit 4;" ^
   "}"
 set "PIN_RESULT=%errorlevel%"
-
-if "%PIN_RESULT%"=="0" (
-  echo.
-  echo [OK] PIN benar. Lanjut uninstall.
-  goto :after_pin
-)
-
-echo.
-if "%PIN_RESULT%"=="5" (
-  echo [STOP] PIN kosong. Uninstall dibatalkan.
-  goto :abort
-)
-if "%PIN_RESULT%"=="2" (
-  echo [STOP] PIN salah. Uninstall dibatalkan.
-  goto :abort
-)
-if "%PIN_RESULT%"=="3" (
-  echo [STOP] PIN Uninstall belum pernah diset di halaman Pengaturan.
-  echo        Set dulu di web: Settings - PIN Uninstall.
-  goto :abort
-)
-if "%PIN_RESULT%"=="6" (
-  echo [STOP] Server menolak identitas PC ini.
-  echo        ServerUrl, PcId, atau AgentToken di registry tidak cocok
-  echo        dengan data PC di server.
-  goto :abort
-)
-if "%PIN_RESULT%"=="4" (
-  echo [STOP] Server tidak bisa dihubungi, jadi PIN tidak terverifikasi.
-  echo        Uninstall dibatalkan.
-  echo.
-  echo        Untuk maintenance saat server mati, pakai bypass di layar
-  echo        login client: klik teks "maintenance" di kiri bawah,
-  echo        masukkan PIN, lalu klik STOP AGENT.
-  goto :abort
-)
-echo [STOP] Verifikasi PIN gagal dengan kode %PIN_RESULT%. Uninstall dibatalkan.
-goto :abort
+set "V3_PINSENT="
+exit /b 0
 
 :abort
 echo.
