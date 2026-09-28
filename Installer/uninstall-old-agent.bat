@@ -1,13 +1,19 @@
 @echo off
 setlocal enabledelayedexpansion
 chcp 1252 >nul 2>&1
-title v3Netbill Agent - Uninstall versi lama
+title v3Netbill Agent - Uninstall
 
 :: ============================================================
-::  v3Netbill Agent - Uninstall versi yang terpasang sekarang
-::  (versi lama yang masih running / diproteksi & tidak punya
-::   tombol Remove). Jalankan SEKALI sebagai Administrator.
-::  Tidak meminta PIN (versi lama belum punya PIN guard).
+::  v3Netbill Agent - Uninstall
+::
+::  PIN diverifikasi ke server SEBELUM service disentuh.
+::  Kalau PIN salah, PIN belum di-set, atau server tidak bisa
+::  dihubungi, script berhenti di sini dan service tetap
+::  jalan seperti semula.
+::
+::  Penting: urutan lama (stop service dulu, PIN belakangan)
+::  berarti billing bisa dimatikan tanpa otorisasi -- begitu
+::  service mati, PC langsung bisa dipakai tanpa penagihan.
 :: ============================================================
 
 :: --- Cek hak admin & self-elevate ---
@@ -20,26 +26,138 @@ if %errorlevel% neq 0 (
 
 echo.
 echo ============================================
-echo  v3Netbill Agent -- UNINSTALL VERSI LAMA
+echo  v3Netbill Agent -- UNINSTALL
 echo ============================================
 echo.
+echo Service dibiarkan berjalan sampai PIN terverifikasi.
+echo.
 
-:: 1) Matikan watchdog task agar tidak start ulang service
+:: ============================================================
+::  LANGKAH 1 - Baca identitas PC dari registry
+:: ============================================================
+set "V3_SERVERURL="
+set "V3_PCID="
+set "V3_TOKEN="
+
+for /f "tokens=2,*" %%A in ('reg query "HKLM\Software\v3Netbill\Agent" /v ServerUrl 2^>nul ^| find "REG_SZ"') do set "V3_SERVERURL=%%B"
+for /f "tokens=2,*" %%A in ('reg query "HKLM\Software\v3Netbill\Agent" /v PcId       2^>nul ^| find "REG_SZ"') do set "V3_PCID=%%B"
+for /f "tokens=2,*" %%A in ('reg query "HKLM\Software\v3Netbill\Agent" /v AgentToken 2^>nul ^| find "REG_SZ"') do set "V3_TOKEN=%%B"
+
+if not defined V3_SERVERURL goto :no_registry
+if not defined V3_PCID      goto :no_registry
+if not defined V3_TOKEN     goto :no_registry
+goto :pin_step
+
+:no_registry
+echo [STOP] Identitas PC tidak ditemukan di registry.
+echo.
+echo   Key : HKLM\Software\v3Netbill\Agent
+echo   Isi : ServerUrl, PcId, AgentToken
+echo.
+echo   Tanpa identitas ini PIN tidak bisa diverifikasi ke server,
+echo   jadi service TIDAK disentuh dan billing tetap berjalan.
+echo.
+echo   Install ulang versi terbaru lebih dulu supaya registry
+echo   ditulis, lalu uninstall lewat Control Panel.
+echo.
+pause
+exit /b 1
+
+:: ============================================================
+::  LANGKAH 2 - Minta PIN (tersembunyi) lalu verifikasi ke server
+::  Dilakukan SEBELUM service dihentikan.
+:: ============================================================
+:pin_step
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='Stop';" ^
+  "$pin=Read-Host 'Masukkan PIN Uninstall' -AsSecureString;" ^
+  "$pin=[System.Net.NetworkCredential]::new('', $pin).Password;" ^
+  "if([string]::IsNullOrWhiteSpace($pin)){Write-Host 'PIN_EMPTY';exit 5};" ^
+  "try {" ^
+  "  $body=@{pcId=$env:V3_PCID;agentToken=$env:V3_TOKEN;pin=$pin}|ConvertTo-Json -Compress;" ^
+  "  $uri=$env:V3_SERVERURL.TrimEnd('/')+'/api/settings/verify-pin';" ^
+  "  $r=Invoke-RestMethod -Uri $uri -Method Post -Body $body -ContentType 'application/json' -TimeoutSec 20;" ^
+  "  if($r.configured -eq $false){Write-Host 'PIN_UNSET';exit 3};" ^
+  "  if($r.valid -eq $true){Write-Host 'PIN_OK';exit 0};" ^
+  "  Write-Host 'PIN_WRONG';exit 2;" ^
+  "} catch [System.Net.WebException] {" ^
+  "  $code=0;" ^
+  "  if($_.Exception.Response){$code=[int]$_.Exception.Response.StatusCode};" ^
+  "  if($code -eq 401 -or $code -eq 403){Write-Host 'PIN_UNAUTHORIZED';exit 6};" ^
+  "  Write-Host 'PIN_UNREACHABLE';exit 4;" ^
+  "} catch {" ^
+  "  Write-Host 'PIN_UNREACHABLE';exit 4;" ^
+  "}"
+set "PIN_RESULT=%errorlevel%"
+
+if "%PIN_RESULT%"=="0" (
+  echo.
+  echo [OK] PIN benar. Lanjut uninstall.
+  goto :after_pin
+)
+
+echo.
+if "%PIN_RESULT%"=="5" (
+  echo [STOP] PIN kosong. Uninstall dibatalkan.
+  goto :abort
+)
+if "%PIN_RESULT%"=="2" (
+  echo [STOP] PIN salah. Uninstall dibatalkan.
+  goto :abort
+)
+if "%PIN_RESULT%"=="3" (
+  echo [STOP] PIN Uninstall belum pernah diset di halaman Pengaturan.
+  echo        Set dulu di web: Settings - PIN Uninstall.
+  goto :abort
+)
+if "%PIN_RESULT%"=="6" (
+  echo [STOP] Server menolak identitas PC ini.
+  echo        ServerUrl, PcId, atau AgentToken di registry tidak cocok
+  echo        dengan data PC di server.
+  goto :abort
+)
+if "%PIN_RESULT%"=="4" (
+  echo [STOP] Server tidak bisa dihubungi, jadi PIN tidak terverifikasi.
+  echo        Uninstall dibatalkan.
+  echo.
+  echo        Untuk maintenance saat server mati, pakai bypass di layar
+  echo        login client: klik teks "maintenance" di kiri bawah,
+  echo        masukkan PIN, lalu klik STOP AGENT.
+  goto :abort
+)
+echo [STOP] Verifikasi PIN gagal dengan kode %PIN_RESULT%. Uninstall dibatalkan.
+goto :abort
+
+:abort
+echo.
+echo Service TIDAK dihentikan. Billing berjalan seperti biasa.
+echo.
+pause
+exit /b 1
+
+:: ============================================================
+::  LANGKAH 3 - PIN valid. Baru sekarang service boleh dihentikan.
+:: ============================================================
+:after_pin
+echo.
+echo --- Uninstall berjalan ---
+
+:: 3a) Matikan watchdog task agar tidak start ulang service
 schtasks /Delete /TN "\v3Netbill\Agent Watchdog" /F >nul 2>&1
 schtasks /Delete /TN "v3NetbillAgentWatchdog" /F >nul 2>&1
 echo [OK] watchdog task dihapus
 
-:: 2) Stop service & pastikan tidak auto-start
+:: 3b) Stop service & pastikan tidak auto-start
 sc stop v3NetbillAgent >nul 2>&1
 sc config v3NetbillAgent start= disabled >nul 2>&1
 echo [OK] service v3NetbillAgent dihentikan
 
-:: 3) Matikan semua proses agent
+:: 3c) Matikan semua proses agent
 taskkill /F /IM Agent.Overlay.exe >nul 2>&1
 taskkill /F /IM Agent.Service.exe >nul 2>&1
 echo [OK] proses agent dihentikan
 
-:: 4) Cari Product Code MSI lalu uninstall resmi
+:: 3d) Cari Product Code MSI lalu uninstall resmi
 set "PRODUCTCODE="
 for /f "delims=" %%G in ('powershell -NoProfile -Command "$s=Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq 'v3Netbill Agent' } | Select-Object -First 1; if($s){ (Split-Path $s.PSPath -Leaf).Trim('{}') }"') do set "PRODUCTCODE=%%G"
 
@@ -56,12 +174,12 @@ if defined PRODUCTCODE (
   echo [i] product code tidak ditemukan - lanjut hapus manual.
 )
 
-:: 5) Hapus service kalau masih tercatat
+:: 3e) Hapus service kalau masih tercatat
 sc stop v3NetbillAgent >nul 2>&1
 sc delete v3NetbillAgent >nul 2>&1
 echo [OK] service (jika ada) dihapus
 
-:: 6) Bersihkan file instalasi & shortcut startup
+:: 3f) Bersihkan file instalasi & shortcut startup
 rd /s /q "%ProgramFiles%\v3NetbillAgent" >nul 2>&1
 rd /s /q "%ProgramFiles(x86)%\v3NetbillAgent" >nul 2>&1
 del /f /q "%ProgramData%\Microsoft\Windows\Start Menu\Programs\StartUp\v3Netbill Agent Overlay.lnk" >nul 2>&1
@@ -72,7 +190,7 @@ del /f /q "%PUBLIC%\Documents\v3netbill-agent-stop.flag" >nul 2>&1
 del /f /q "%USERPROFILE%\Documents\v3netbill-agent-stop.flag" >nul 2>&1
 echo [OK] file & shortcut dibersihkan
 
-:: 7) Bersihkan registry agent
+:: 3g) Bersihkan registry agent
 reg delete "HKLM\Software\v3Netbill" /f >nul 2>&1
 reg delete "HKCU\Software\v3Netbill" /f >nul 2>&1
 reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\System" /v DisableTaskMgr /f >nul 2>&1
@@ -82,7 +200,7 @@ if defined PRODUCTCODE (
 )
 echo [OK] registry dibersihkan
 
-:: 8) Pastikan tidak hidup lagi
+:: 3h) Pastikan tidak hidup lagi
 sc query v3NetbillAgent >nul 2>&1
 if errorlevel 1 (
   echo [OK] service sudah tidak ada.
@@ -92,9 +210,9 @@ if errorlevel 1 (
 
 echo.
 echo ============================================
-echo  Selesai! Versi lama sudah dihapus.
-echo  Sekarang jalankan installer MSI versi baru.
-echo  (Major upgrade otomatis tidak lagi terkunci)
+echo  Selesai! Agent sudah dihapus.
+echo  Install lagi lewat installer MSI bila perlu.
 echo ============================================
 echo.
 pause
+exit /b 0
