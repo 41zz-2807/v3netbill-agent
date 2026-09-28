@@ -98,3 +98,17 @@ public sealed class OtpConfigPayload
     [JsonPropertyName("chatId")]
     public string? ChatId { get; set; }
 }
+
+/// <summary>Balasan ack <c>client:create_password</c> dari server.</summary>
+/// <remarks>
+/// Mengikuti <see cref="ClientLoginResultPayload"/>: nama C# untuk pembaca di
+/// Worker, nama wire mengikuti emit backend (<c>success</c>/<c>message</c>).
+/// </remarks>
+public sealed class CreatePasswordResultPayload
+{
+    [JsonPropertyName("success")]
+    public bool Sukses { get; set; }
+
+    [JsonPropertyName("message")]
+    public string? Alasan { get; set; }
+}

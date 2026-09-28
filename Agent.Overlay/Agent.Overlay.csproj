@@ -6,6 +6,8 @@
     <RootNamespace>V3Netbill.Agent.Overlay</RootNamespace>
     <AssemblyName>Agent.Overlay</AssemblyName>
     <UseWPF>true</UseWPF>
+    <!-- Ikon aplikasi Windows; juga dipakai ulang oleh WiX untuk ikon installer. -->
+    <ApplicationIcon>app.ico</ApplicationIcon>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
@@ -21,6 +23,12 @@
 
   <ItemGroup>
     <None Include="..\appsettings.json" Link="appsettings.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Ditulis eksplisit, bukan mengandalkan glob bawaan WPF, supaya gambar
+         pasti tersedia sebagai Resource dan bisa dipakai lewat pack URI. -->
+    <Resource Include="Assets\logo-v3netbill.png" />
   </ItemGroup>
 
 </Project>

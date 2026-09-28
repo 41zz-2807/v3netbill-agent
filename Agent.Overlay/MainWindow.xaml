@@ -115,6 +115,11 @@
                     Padding="34,30"
                     Visibility="Visible">
                 <StackPanel>
+                    <Image Source="/Assets/logo-v3netbill.png"
+                           Height="64"
+                           Stretch="Uniform"
+                           HorizontalAlignment="Center"
+                           Margin="0,0,0,18"/>
                     <TextBlock Text="LOGIN VOUCHER / MEMBER" 
                                FontSize="18" FontWeight="SemiBold" 
                                Style="{StaticResource OverlayTextStyle}"
@@ -215,6 +220,35 @@
                         </Button.Template>
                     </Button>
 
+                    <!-- Ganti password sendiri. Password lama tidak ditanyakan karena
+                         semua akun baru mulai dari password bawaan yang sama. -->
+                    <Button x:Name="BuatPasswordButton"
+                            Content="BUAT / GANTI PASSWORD"
+                            Height="44"
+                            FontSize="13" FontWeight="Bold"
+                            Background="#2A3040"
+                            Foreground="#C6CEDC"
+                            BorderThickness="0"
+                            Cursor="Hand"
+                            Margin="0,10,0,0"
+                            Click="BuatPasswordButton_Click">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="10">
+                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="bd" Property="Background" Value="#3A4256"/>
+                                    </Trigger>
+                                    <Trigger Property="IsPressed" Value="True">
+                                        <Setter TargetName="bd" Property="Background" Value="#232937"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+
                     <TextBlock x:Name="ErrorText" 
                                Text="" 
                                FontSize="13" 
@@ -225,6 +259,90 @@
                 </StackPanel>
             </Border>
 
+
+            <!-- Dialog buat/ganti password (hidden by default) -->
+            <Border x:Name="BuatPasswordDialog"
+                    Background="#F21A1A22"
+                    CornerRadius="16"
+                    Padding="28,24"
+                    Width="380"
+                    Visibility="Collapsed">
+                <StackPanel>
+                    <TextBlock Text="BUAT / GANTI PASSWORD"
+                               FontSize="16" FontWeight="Bold"
+                               Foreground="White"
+                               HorizontalAlignment="Center" Margin="0,0,0,6"/>
+                    <TextBlock Text="Password awal semua akun 0000, jadi tidak perlu password lama."
+                               FontSize="12"
+                               Foreground="#8A93A6"
+                               TextWrapping="Wrap"
+                               HorizontalAlignment="Center"
+                               Margin="0,0,0,16"/>
+
+                    <TextBlock Text="KODE VOUCHER / MEMBER" Style="{StaticResource FieldCaptionStyle}"/>
+                    <TextBox x:Name="BuatPasswordKodeBox"
+                             Height="44" FontSize="15" MaxLength="24"
+                             VerticalContentAlignment="Center"
+                             Padding="14,0" BorderThickness="1" BorderBrush="#2EFFFFFF"
+                             Background="{StaticResource FieldInsetBrush}"
+                             Foreground="White" CaretBrush="#00D4AA"
+                             Template="{StaticResource PillFieldTemplate}"/>
+
+                    <TextBlock Text="PASSWORD BARU" Style="{StaticResource FieldCaptionStyle}" Margin="0,16,0,0"/>
+                    <PasswordBox x:Name="BuatPasswordBox"
+                                 Height="44" FontSize="15" MaxLength="12"
+                                 VerticalContentAlignment="Center"
+                                 Padding="14,0" BorderThickness="1" BorderBrush="#2EFFFFFF"
+                                 Background="{StaticResource FieldInsetBrush}"
+                                 Foreground="White" CaretBrush="#00D4AA"
+                                 Template="{StaticResource PillPasswordTemplate}"/>
+
+                    <TextBlock x:Name="BuatPasswordErrorText"
+                               Text=""
+                               FontSize="12"
+                               Foreground="#FF6B6B"
+                               TextWrapping="Wrap"
+                               Margin="0,12,0,0"
+                               Visibility="Collapsed"/>
+
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,18,0,0">
+                        <Button x:Name="BuatPasswordOkButton" Content="SIMPAN" Width="120" Height="40"
+                                FontSize="13" FontWeight="Bold"
+                                Background="#00D4AA" Foreground="#0C1118" BorderThickness="0"
+                                Margin="0,0,10,0" Cursor="Hand" Click="BuatPasswordOkButton_Click">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="8">
+                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="bd" Property="Background" Value="#00E8BB"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Button.Template>
+                        </Button>
+                        <Button x:Name="BuatPasswordCancelButton" Content="BATAL" Width="120" Height="40"
+                                FontSize="13" FontWeight="Bold"
+                                Background="#2A3040" Foreground="#C6CEDC" BorderThickness="0"
+                                Cursor="Hand" Click="BuatPasswordCancelButton_Click">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="8">
+                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="bd" Property="Background" Value="#3A4256"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Button.Template>
+                        </Button>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
 
             <!-- Technician PIN Dialog (hidden by default) -->
             <Border x:Name="PinDialog" 

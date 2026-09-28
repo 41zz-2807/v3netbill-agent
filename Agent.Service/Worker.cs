@@ -27,13 +27,15 @@ internal enum PipeMessageType
     PinVerifyResult = 6,    // PIN verification result (sukses)
     ServerLink = 7,         // Status koneksi ke server berubah (terhubung/terputus)
     OtpResult = 8,          // Hasil permintaan OTP (berhasil/gagal + pesan)
+    CreatePasswordResult = 9, // Hasil permintaan buat/ganti password
 
     // Overlay → Service
     LoginRequest = 100,     // Login request (kode, password)
     PinVerifyRequest = 101, // PIN verify request (pin)
     StateRequest = 102,     // Overlay minta state terkini (setelah reconnect)
     StopSessionRequest = 103, // Overlay minta hentikan sesi yang berjalan (stop sendiri)
-    OtpRequest = 104        // Overlay minta kirim OTP ke Telegram
+    OtpRequest = 104,       // Overlay minta kirim OTP ke Telegram
+    CreatePasswordRequest = 105 // Overlay minta dibuatkan password baru untuk sebuah kode
 }
 
 internal record PipeMessage(PipeMessageType Type, string Payload);
@@ -510,6 +512,35 @@ public class Worker : BackgroundService
                     await SendCurrentServerLink();
                     break;
                 }
+            case PipeMessageType.CreatePasswordRequest:
+                {
+                    var req = JsonConvert.DeserializeObject<CreatePasswordPayload>(msg.Payload);
+                    if (req == null || string.IsNullOrWhiteSpace(req.Kode))
+                    {
+                        await SendToOverlayAsync(new PipeMessage(
+                            PipeMessageType.CreatePasswordResult,
+                            JsonConvert.SerializeObject(new { sukses = false, pesan = "Kode wajib diisi." })));
+                        break;
+                    }
+                    if (_serverConnection == null || !_serverConnection.IsConnected)
+                    {
+                        await SendToOverlayAsync(new PipeMessage(
+                            PipeMessageType.CreatePasswordResult,
+                            JsonConvert.SerializeObject(new { sukses = false, pesan = "Belum terhubung ke server." })));
+                        break;
+                    }
+                    var hasil = await _serverConnection.SendCreatePasswordAsync(req.Kode, req.Password, ct);
+                    await SendToOverlayAsync(new PipeMessage(
+                        PipeMessageType.CreatePasswordResult,
+                        JsonConvert.SerializeObject(new
+                        {
+                            sukses = hasil?.Sukses == true,
+                            pesan = hasil?.Sukses == true
+                                ? "Password berhasil diganti. Silakan login dengan password baru."
+                                : hasil?.Alasan ?? "Gagal mengganti password.",
+                        })));
+                    break;
+                }
             case PipeMessageType.StopSessionRequest:
                 {
                     AgentLog.Write("Terima StopSessionRequest dari overlay — minta stop sesi ke backend");
@@ -717,6 +748,8 @@ public class Worker : BackgroundService
 
     // Payload records
     private record LoginRequestPayload(string Kode, string Password);
+
+    private record CreatePasswordPayload(string Kode, string Password);
     private record PinVerifyRequestPayload(string Pin);
     private record PinVerifyResponse(bool Sukses);
 }

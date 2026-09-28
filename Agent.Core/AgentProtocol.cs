@@ -19,6 +19,7 @@ public static class AgentEvents
 
     // ---------- server → agent (receive) ----------
     public const string ClientLoginResult = "client:login_result";
+    public const string ClientCreatePassword = "client:create_password";
     public const string SessionStart = "session:start";
     public const string SessionTick = "session:tick";
     public const string SessionStop = "session:stop";

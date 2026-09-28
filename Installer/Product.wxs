@@ -29,6 +29,13 @@
            Compressed="yes"
            Scope="perMachine">
 
+    <!-- Ikon produk: dipakai untuk ikon MSI di Explorer/Add-Remove Programs. -->
+    <Icon Id="V3NetbillIcon" SourceFile="..\Agent.Overlay\app.ico" />
+
+    <!-- Banner 370x44, mengikuti ukuran yang diminta WixUI_Bmp_Banner.
+         Background gelap, bukan putih, supaya logo biru tetap kontras. -->
+    <ui:WixVariable Id="WixUIBannerBmp" Value="V3NetbillBanner.bmp" Type="string" />
+
     <MajorUpgrade DowngradeErrorMessage="Versi yang lebih baru sudah terpasang."
                   Schedule="afterInstallInitialize" />
 
@@ -40,6 +47,9 @@
     <ui:WixUI Id="InstallDir_ServerConfig" InstallDirectory="INSTALLFOLDER" />
 
     <!-- ===== Feature ===== -->
+    <!-- Ikon di panel Programs and Features. -->
+    <Property Id="ARPPRODUCTICON" Value="V3NetbillIcon" />
+
     <Feature Id="MainFeature" Title="v3Netbill Agent" Level="1">
       <ComponentGroupRef Id="SvcExeComponents" />
       <ComponentGroupRef Id="SvcDepComponents" />        <!-- dari generator -->

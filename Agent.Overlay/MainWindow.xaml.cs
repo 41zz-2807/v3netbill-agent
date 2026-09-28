@@ -41,6 +41,11 @@ public partial class MainWindow : Window
     private bool _emergencyExit;
     private DispatcherTimer? _countdownTimer;
 
+    // Password yang barusan dikirim ke service. Disimpan supaya bisa langsung
+    // mengisi kolom login setelah server mengonfirmasi, tanpa perlu parse ulang
+    // dari teks pesan.
+    private string _passwordBaruTerakhir = string.Empty;
+
     private const string EmergencyPin = "123456";
     private static readonly string StopFlagPath =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments), "v3netbill-agent-stop.flag");
@@ -330,6 +335,9 @@ public partial class MainWindow : Window
                 case PipeMessageType.OtpResult:
                     HandleOtpResult(msg.Payload);
                     break;
+                case PipeMessageType.CreatePasswordResult:
+                    HandleCreatePasswordResult(msg.Payload);
+                    break;
             }
         });
     }
@@ -344,6 +352,7 @@ public partial class MainWindow : Window
             if (result.Sukses)
             {
                 ErrorText.Visibility = Visibility.Collapsed;
+        ErrorText.Foreground = Brushes.IndianRed;
                 AgentLog.Write("LoginResult: SUKSES dari service");
                 // Jaring pengaman: minta state terkini agar window mini pasti muncul
                 // meski ada StateUpdate yang sempat gagal/tertukar.
@@ -509,6 +518,92 @@ public partial class MainWindow : Window
     }
 
     // Button click handlers
+    /// <summary>Buka dialog buat/ganti password.</summary>
+    private void BuatPasswordButton_Click(object sender, RoutedEventArgs e)
+    {
+        // Kode diambil dari kolom login supaya tidak diketik dua kali.
+        BuatPasswordKodeBox.Text = KodeTextBox.Text.Trim();
+        BuatPasswordBox.Password = string.Empty;
+        BuatPasswordErrorText.Visibility = Visibility.Collapsed;
+        BuatPasswordDialog.Visibility = Visibility.Visible;
+        BuatPasswordKodeBox.Focus();
+    }
+
+    private void BuatPasswordCancelButton_Click(object sender, RoutedEventArgs e)
+    {
+        TutupDialogBuatPassword();
+    }
+
+    private void TutupDialogBuatPassword()
+    {
+        BuatPasswordDialog.Visibility = Visibility.Collapsed;
+        BuatPasswordBox.Password = string.Empty;
+        KodeTextBox.Focus();
+    }
+
+    private async void BuatPasswordOkButton_Click(object sender, RoutedEventArgs e)
+    {
+        string kode = BuatPasswordKodeBox.Text.Trim();
+        string password = BuatPasswordBox.Password.Trim();
+
+        if (string.IsNullOrWhiteSpace(kode))
+        {
+            TampilkanGalatBuatPassword("Masukkan kode voucher atau member.");
+            return;
+        }
+        if (password.Length < 4)
+        {
+            TampilkanGalatBuatPassword("Password baru minimal 4 karakter.");
+            return;
+        }
+        if (!_pipeClient.IsConnected)
+        {
+            TampilkanGalatBuatPassword("Belum tersambung ke service - tunggu beberapa saat lalu coba lagi.");
+            return;
+        }
+
+        TampilkanGalatBuatPassword("Mengirim ke server...");
+        AgentLog.Write($"Kirim create_password ke service: kode='{kode}'");
+        _passwordBaruTerakhir = password;
+        await _pipeClient.SendCreatePasswordRequestAsync(kode, password);
+    }
+
+    private void TampilkanGalatBuatPassword(string pesan)
+    {
+        BuatPasswordErrorText.Text = pesan;
+        BuatPasswordErrorText.Visibility = Visibility.Visible;
+    }
+
+    private void HandleCreatePasswordResult(string json)
+    {
+        try
+        {
+            var hasil = JsonConvert.DeserializeObject<CreatePasswordResultPayload>(json);
+            if (hasil == null) return;
+
+            if (hasil.Sukses)
+            {
+                AgentLog.Write("create_password berhasil");
+                PasswordBox.Password = _passwordBaruTerakhir;
+                _passwordBaruTerakhir = string.Empty;
+                TutupDialogBuatPassword();
+                ErrorText.Text = "Password diganti. Tekan LOGIN untuk masuk.";
+                ErrorText.Foreground = Brushes.MediumSeaGreen;
+                ErrorText.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                AgentLog.Write($"create_password gagal: {hasil.Pesan}");
+                TampilkanGalatBuatPassword(hasil.Pesan ?? "Gagal mengganti password.");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Gagal membaca hasil create_password");
+            TampilkanGalatBuatPassword("Gagal membaca jawaban server.");
+        }
+    }
+
     private async void LoginButton_Click(object sender, RoutedEventArgs e)
     {
         string kode = KodeTextBox.Text.Trim();
@@ -601,4 +696,6 @@ public partial class MainWindow : Window
     private record LoginResultPayload(bool Sukses, string? Alasan);
     private record PinVerifyPayload(bool Sukses, bool? ViaOtp, string? Pesan);
     private record OtpResultPayload(bool Sukses, string? Pesan);
+
+    private record CreatePasswordResultPayload(bool Sukses, string? Pesan);
 }

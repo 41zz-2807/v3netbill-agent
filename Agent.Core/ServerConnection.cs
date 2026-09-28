@@ -1,9 +1,11 @@
 using System;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using SocketIOClient;
 using SocketIOClient.Common;
+using SocketIOClient.Common.Messages;
 using V3Netbill.Agent.Core;
 
 namespace V3Netbill.Agent.Core;
@@ -243,6 +245,59 @@ public sealed class ServerConnection : IAsyncDisposable
             kredensial = new { kode, password },
         } ], ct);
         _logger.LogInformation("client:login_request untuk kode {Kode}", kode);
+    }
+
+    /// <summary>
+    /// Client (overlay) minta dibuatkan password baru untuk sebuah kode.
+    /// </summary>
+    /// <remarks>
+    /// Password lama sengaja tidak dikirim. Semua akun baru mulai dari password
+    /// bawaan yang sama, jadi orang yang memakai komputer tidak perlu mengingat
+    /// apa pun untuk bisa mengganti passwordnya sendiri.
+    /// </remarks>
+    public async Task<CreatePasswordResultPayload?> SendCreatePasswordAsync(
+        string kode,
+        string password,
+        CancellationToken ct = default)
+    {
+        if (!_client.Connected) return null;
+
+        // SocketIOClient 4.x tidak punya EmitWithAckAsync. Ack diambil lewat
+        // overload EmitAsync yang menerima callback, jadi jawabannya ditahan di
+        // variabel luar lalu dibaca setelah EmitAsync selesai.
+        CreatePasswordResultPayload? hasil = null;
+        await _client.EmitAsync(
+            AgentEvents.ClientCreatePassword,
+            new object[] { new { pcId = _pcId, kode, password } },
+            response =>
+            {
+                // Bentuk ack bisa berupa objek di indeks 0, atau seluruh isi
+                // message. Dua-duanya dicoba supaya tidak bergantung pada
+                // bentuk persis yang dikirim NestJS.
+                hasil = BacaAck(response);
+                return Task.CompletedTask;
+            },
+            ct);
+
+        return hasil;
+    }
+
+    /// <summary>Baca balasan ack, coba bentuk objek-indeks-0 lalu seluruh message.</summary>
+    private static CreatePasswordResultPayload? BacaAck(IDataMessage? response)
+    {
+        if (response == null) return null;
+        try
+        {
+            var json = response.GetValue<string>(0);
+            if (string.IsNullOrWhiteSpace(json)) json = response.RawText;
+            return string.IsNullOrWhiteSpace(json)
+                ? null
+                : JsonSerializer.Deserialize<CreatePasswordResultPayload>(json);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>Client (overlay) minta berhenti dari sesi yang sedang berjalan.</summary>

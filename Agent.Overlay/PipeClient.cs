@@ -172,6 +172,13 @@ public class PipeClient : IDisposable
         await SendAsync(new PipeMessage(PipeMessageType.OtpRequest, "{}"), ct);
     }
 
+    /// <summary>Minta service dibuatkan password baru untuk sebuah kode.</summary>
+    public async Task SendCreatePasswordRequestAsync(string kode, string password, CancellationToken ct = default)
+    {
+        var payload = JsonConvert.SerializeObject(new { kode, password });
+        await SendAsync(new PipeMessage(PipeMessageType.CreatePasswordRequest, payload), ct);
+    }
+
     public void Dispose()
     {
         _cts?.Cancel();
@@ -192,11 +199,13 @@ public enum PipeMessageType
     PinVerifyResult = 6,
     ServerLink = 7,
     OtpResult = 8,
+    CreatePasswordResult = 9,
     LoginRequest = 100,
     PinVerifyRequest = 101,
     StateRequest = 102,
     StopSessionRequest = 103,
-    OtpRequest = 104
+    OtpRequest = 104,
+    CreatePasswordRequest = 105
 }
 
 public record PipeMessage(PipeMessageType Type, string Payload);
