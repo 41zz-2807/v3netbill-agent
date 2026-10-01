@@ -59,6 +59,12 @@
     </Feature>
 
     <!-- ===== Properties (input pengguna) ===== -->
+    <!-- ⚠️ Nilai di bawah HANYA fallback. Build CI menimpanya lewat
+         `wix build -d SERVER_URL=...` (lihat build-agent.yml). Kalau suatu
+         kali build dilakukan tanpa flag itu, MSI akan terpasang dengan
+         localhost:3000 dan agent akan mencoba konek ke PC-nya sendiri —
+         gejalanya PC OFFLINE + wallpaper tidak berubah, jauh dari sini.
+         Step "Verify MSI contents" sekarang gagal keras kalau ini terjadi. -->
     <Property Id="SERVER_URL" Value="http://localhost:3000" />
     <Property Id="PC_ID" Value="PC001">
       <RegistrySearch Id="PrefillPcId" Root="HKLM" Key="Software\v3Netbill\Agent" Name="PcId" Type="raw" />

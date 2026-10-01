@@ -15,6 +15,17 @@ env:
   WIX_VERSION: '4.0.5'
   MSI_OUT: 'v3NetbillAgentSetup.msi'
 
+  # Base URL server untuk agent. Dipakai sebagai default kolom "Server URL"
+  # di dialog installer, jadi MSI yang terpasang sudah benar sejak awal —
+  # tidak perlu kasir mengetik ulang.
+  #
+  # ⚠️ Dulu nilai ini TIDAK pernah diteruskan ke `wix build`, sehingga MSI
+  # selalu memakai default Product.wxs yaitu http://localhost:3000.
+  # Agent lalu mencoba konek ke localhost di PC kasir, tidak pernah sampai
+  # ke server: PC jadi OFFLINE dan wallpaper tidak pernah terunduh.
+  # Fallback ke domain publik dipakai kalau variable repo belum diisi.
+  SERVER_URL: ${{ vars.SERVER_URL }}
+
 jobs:
   build-agent:
     name: Build Agent (Windows)
@@ -149,6 +160,7 @@ jobs:
             -d OverlayPublishDir="$ws/artifacts/Agent.Overlay.Special\" `
             -d OverlayDepDir="$ws/artifacts/Agent.Overlay\" `
             -d licenseRtf="$ws/Installer/license.rtf" `
+            -d SERVER_URL="${{ env.SERVER_URL }}" `
             -ext WixToolset.UI.wixext `
             -o "$ws/artifacts/${{ env.MSI_OUT }}"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -181,6 +193,29 @@ jobs:
           if (-not $ovlExe) { Write-Error "Missing Agent.Overlay.exe di MSI"; exit 1 }
           if ($cfg.Count -lt 2) { Write-Error "appsettings.json < 2 di MSI"; exit 1 }
           $files | Sort-Object | ForEach-Object { Write-Host "   $_" }
+
+          # --- ServerUrl HARUS benar, bukan sekadar file-nya ada ---
+          # Default bawaan Product.wxs adalah http://localhost:3000. Kalau
+          # nilai itu tidak tertimpa, agent akan mencoba konek ke localhost
+          # di PC kasir: tidak pernah sampai ke server, PC jadi OFFLINE, dan
+          # wallpaper tidak pernah terunduh. Gejalanya muncul jauh dari
+          # penyebabnya, jadi di sini harus gagal keras, bukan lolos.
+          $expected = "${{ env.SERVER_URL }}"
+          $viewP = $db.OpenView("SELECT Value FROM Property WHERE Property = 'SERVER_URL'")
+          $viewP.Execute()
+          $actual = ""
+          if ($recP = $viewP.Fetch()) { $actual = "$($recP.StringData(1))" }
+          $viewP.Close()
+          Write-Host "SERVER_URL di MSI: '$actual' (harapan: '$expected')"
+          if ([string]::IsNullOrWhiteSpace($actual) -or $actual -eq 'http://localhost:3000') {
+            Write-Error "SERVER_URL di MSI kosong atau masih localhost:3000. Agent tidak akan konek. Set GitHub Actions variable SERVER_URL."
+            exit 1
+          }
+          if ($actual -ne $expected) {
+            Write-Error "SERVER_URL di MSI tidak sama dengan yang diharapkan ('$actual' != '$expected')"
+            exit 1
+          }
+
           Write-Host "MSI verification passed."
 
       # ----- Upload Artifact -----
