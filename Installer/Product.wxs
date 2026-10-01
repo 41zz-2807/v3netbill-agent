@@ -65,7 +65,16 @@
          localhost:3000 dan agent akan mencoba konek ke PC-nya sendiri —
          gejalanya PC OFFLINE + wallpaper tidak berubah, jauh dari sini.
          Step "Verify MSI contents" sekarang gagal keras kalau ini terjadi. -->
-    <Property Id="SERVER_URL" Value="http://localhost:3000" />
+    <!-- ⚠️ WAJIB lewat `$(var.…)`, bukan literal. `-d SERVER_URL=...` di
+         build-agent.yml hanya membuat preprocessor variable; kalau nilainya
+         ditulis langsung di sini, define itu tidak pernah terpakai dan MSI
+         tetap memakai localhost:3000. Pola yang sama dipakai
+         $(var.SvcPublishDir) di baris Source= di bawah.
+
+         Karena tidak ada fallback, build tanpa `-d SERVER_URL=...` akan GAGAL
+         — dan itu memang lebih baik daripada MSI yang terpasang tapi tidak
+         konek. Step "Verify MSI contents" juga memeriksa nilainya. -->
+    <Property Id="SERVER_URL" Value="$(var.SERVER_URL)" />
     <Property Id="PC_ID" Value="PC001">
       <RegistrySearch Id="PrefillPcId" Root="HKLM" Key="Software\v3Netbill\Agent" Name="PcId" Type="raw" />
     </Property>
