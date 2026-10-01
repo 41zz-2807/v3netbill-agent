@@ -214,7 +214,6 @@ public partial class MainWindow : Window
         {
             // Fullscreen login (idle)
             OverlayBackground.Visibility = Visibility.Visible;
-            SinkronkanVeil();
             ContentPanel.Visibility = Visibility.Visible;
             LoginCard.Visibility = Visibility.Visible;
             MiniPanel.Visibility = Visibility.Collapsed;
@@ -236,6 +235,12 @@ public partial class MainWindow : Window
             MiniPanel.Visibility = Visibility.Collapsed;
             AdminPinButton.Visibility = Visibility.Collapsed;
         }
+
+        // ⚠️ WAJIB di luar cabang, dipanggil sekali di akhir. Versi awal
+        // memanggilnya hanya di cabang `locked`, jadi begitu pengguna login
+        // dan OverlayBackground di-Collapsed, veil putih 62% TETAP menggantung
+        // di atas seluruh desktop — layar jadi terlihatwashed out.
+        SinkronkanVeil();
     }
 
     private void UpdateWindowState()
@@ -384,7 +389,7 @@ public partial class MainWindow : Window
             var result = JsonConvert.DeserializeObject<PinVerifyPayload>(json);
             if (result?.Sukses == true)
             {
-                PinDialog.Visibility = Visibility.Collapsed;
+                TutupDialogPin();
                 _keyboardHook.Disable(); // allow desktop access
                 // Sembunyikan overlay agar desktop terlihat (akses teknisi)
                 WindowState = WindowState.Minimized;
@@ -489,6 +494,11 @@ public partial class MainWindow : Window
     {
         PinBox.Password = "";
         PinDialog.Visibility = Visibility.Visible;
+        // Kartu login HARUS disembunyikan. Keduanya anak dari ContentPanel
+        // yang sama, jadi tanpa ini keduanya tampil bertumpuk vertikal —
+        // persis yang terlihat di tangkapan layar: kartu login di atas,
+        // dialog PIN di bawahnya.
+        LoginCard.Visibility = Visibility.Collapsed;
         PinBox.Focus();
     }
 
@@ -749,7 +759,20 @@ public partial class MainWindow : Window
 
     private void PinCancelButton_Click(object sender, RoutedEventArgs e)
     {
+        TutupDialogPin();
+    }
+
+    /// <summary>
+    /// Menutup dialog PIN dan mengembalikan kartu login. ShowPinDialog()
+    /// menyembunyikan LoginCard supaya keduanya tidak bertumpuk, jadi setiap
+    /// jalur yang menutup dialog HARUS mengembalikannya — kalau tidak,
+    /// layar login kosong dan tidak ada yang bisa diklik untuk login lagi.
+    /// </summary>
+    private void TutupDialogPin()
+    {
         PinDialog.Visibility = Visibility.Collapsed;
+        LoginCard.Visibility = Visibility.Visible;
+        KodeTextBox.Focus();
     }
 
     // Payload records

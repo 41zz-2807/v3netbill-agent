@@ -304,9 +304,12 @@
                 VerticalAlignment="Top"
                 Margin="16"
                 Visibility="Collapsed">
-            <Border.Effect>
-                <DropShadowEffect BlurRadius="24" ShadowDepth="4" Opacity="0.16" Color="#0F172A"/>
-            </Border.Effect>
+            <!-- ⚠️ TIDAK pakai DropShadowEffect di sini. Di bawah RDP tanpa GPU
+                 WPF memakai software rendering, dan BlurRadius tidak lagi
+                 diburamai — ia tergambar sebagai KOTAK transparan berbali
+                 tepat di sekeliling panel (terlihat di tangkapan layar kedua).
+                 Batas 1px + warna kartu putih sudah cukup memisahkan panel dari
+                 desktop, dan yang ini tidak bisa gagal merender jadi kotak. -->
             <StackPanel Width="300">
                 <!-- Header: strip gradien cyan gaya Uiverse -->
                 <Border Background="#FFE0F7FA" CornerRadius="16,16,0,0" Padding="16,12,8,12">
