@@ -8,15 +8,28 @@
              dialog ganti password yang terpisah tidak akan menemukannya kalau
              masih ditaruh di sana. -->
 
+        <!-- Palet disamakan dengan kartu PC di aplikasi web: header pastel
+             cyan, panel putih, teks slate. Aksen teal #00D4AA tetap dipakai
+             karena itu warna aksi utama di aplikasi ini (LOGIN, fokus field,
+             garis timeline hijau). -->
+        <Color x:Key="PastelHeaderColor">#E0F7FA</Color>
+        <Color x:Key="TeksGelapColor">#0F172A</Color>
+        <Color x:Key="TeksSedangColor">#334155</Color>
+        <Color x:Key="TeksRedupColor">#64748B</Color>
+        <Color x:Key="GarisColor">#CBD5E1</Color>
+        <Color x:Key="AksenColor">#00D4AA</Color>
+
+        <!-- Insets untuk field. Di tema gelap ini gradien hitam; di tema terang
+             cukup garis tipis, jadi isinya dibuat nyaris tak terlihat. Tetap
+             dipakai supaya tema bisa diubah dari satu tempat. -->
         <LinearGradientBrush x:Key="FieldInsetBrush" StartPoint="0,0" EndPoint="0,1">
-            <GradientStop Color="#33000000" Offset="0"/>
-            <GradientStop Color="#1A000000" Offset="0.30"/>
-            <GradientStop Color="#0A000000" Offset="0.70"/>
-            <GradientStop Color="#00000000" Offset="1"/>
+            <GradientStop Color="#0A0F172A" Offset="0"/>
+            <GradientStop Color="#000F172A" Offset="0.35"/>
+            <GradientStop Color="#000F172A" Offset="1"/>
         </LinearGradientBrush>
 
         <Style x:Key="FieldCaptionStyle" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#8A93A6"/>
+            <Setter Property="Foreground" Value="#64748B"/>
             <Setter Property="FontSize" Value="11"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Margin" Value="0,0,0,7"/>

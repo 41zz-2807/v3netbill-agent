@@ -11,13 +11,8 @@
         ShowInTaskbar="False"
         WindowState="Normal"
         ResizeMode="NoResize">
-    
-    <Window.Resources>
-        <Style x:Key="OverlayTextStyle" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="FontFamily" Value="Segoe UI"/>
-        </Style>
 
+    <Window.Resources>
         <!-- Meniru box-shadow: inset 2px 5px 10px dari CSS Uiverse. WPF tidak punya
              inner shadow, jadi dipakai gradien yang lebih gelap di atas lalu memudar
              ke bawah. Satu elemen, tanpa Border bersarang. -->
@@ -68,188 +63,229 @@
     </Window.Resources>
 
     <Grid x:Name="RootGrid">
-        <!-- Fullscreen overlay background (visible when Locked) -->
-        <Border x:Name="OverlayBackground" 
-                Background="#CC000000" 
+        <!-- Latar layar penuh. Warnanya fallback LIGHT, bukan hitam seperti
+             sebelumnya: kalau wallpaper belum pernah diunggah lewat web, tema
+             terang akan terlihat rusak kalau latarnya hitam pekat. -->
+        <Border x:Name="OverlayBackground" Visibility="Collapsed">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                    <GradientStop Color="#F0FAFB" Offset="0"/>
+                    <GradientStop Color="#E0F7FA" Offset="0.45"/>
+                    <GradientStop Color="#FFFFFF" Offset="1"/>
+                </LinearGradientBrush>
+            </Border.Background>
+        </Border>
+
+        <!-- Veil putih DI ATAS wallpaper. Tanpa ini, wallpaper gelap apa pun
+             yang diunggah lewat web akan membuat layar tetap gelap while kartu
+             putihnya tampak nempel. valued veil membuat gambar tetap terlihat
+             tapi seluruh layar terasa light, sama seperti latar aplikasi web. -->
+        <Border x:Name="WallpaperVeil"
+                Background="#FFFFFFFF"
+                Opacity="0.62"
                 Visibility="Collapsed"/>
 
         <!-- Main content centered -->
-        <StackPanel x:Name="ContentPanel" 
-                    VerticalAlignment="Center" 
-                    HorizontalAlignment="Center" 
+        <StackPanel x:Name="ContentPanel"
+                    VerticalAlignment="Center"
+                    HorizontalAlignment="Center"
                     Width="420"
                     Visibility="Visible">
-            
-            <!-- Login Card (visible when Locked) -->
-            <Border x:Name="LoginCard" 
-                    Background="#F21A1A22" 
-                    CornerRadius="20" 
-                    Padding="34,30"
+
+            <!-- Kartu login: panel putih radius 16 dengan header pastel cyan,
+                 sama seperti kartu PC di aplikasi web. BorderBrush dipakai
+                 supaya kartu tetap terlihat di atas wallpaper yang terang. -->
+            <Border x:Name="LoginCard"
+                    Background="#FFFFFFFF"
+                    BorderBrush="#E2E8F0"
+                    BorderThickness="1"
+                    CornerRadius="16"
                     Visibility="Visible">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="40" ShadowDepth="6" Opacity="0.18" Color="#0F172A"/>
+                </Border.Effect>
                 <StackPanel>
-                    <Image Source="/Assets/logo-v3netbill.png"
-                           Height="64"
-                           Stretch="Uniform"
-                           HorizontalAlignment="Center"
-                           Margin="0,0,0,18"/>
-                    <TextBlock Text="LOGIN VOUCHER / MEMBER" 
-                               FontSize="18" FontWeight="SemiBold" 
-                               Style="{StaticResource OverlayTextStyle}"
-                               HorizontalAlignment="Center" Margin="0,0,0,4"/>
 
-                    <StackPanel Orientation="Horizontal" 
-                                HorizontalAlignment="Center" Margin="0,0,0,24">
-                        <Ellipse Width="7" Height="7" VerticalAlignment="Center" Margin="0,0,6,0">
-                            <Ellipse.Style>
-                                <Style TargetType="Ellipse">
-                                    <Setter Property="Fill" Value="#868E96"/>
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding ServerStatus}" Value="connected">
-                                            <Setter Property="Fill" Value="#2F9E44"/>
-                                        </DataTrigger>
-                                        <DataTrigger Binding="{Binding ServerStatus}" Value="disconnected">
-                                            <Setter Property="Fill" Value="#E03131"/>
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </Ellipse.Style>
-                        </Ellipse>
-                        <TextBlock Text="{Binding ServerStatusText}"
-                                   FontSize="11"
-                                   Style="{StaticResource OverlayTextStyle}"
-                                   VerticalAlignment="Center"/>
-                    </StackPanel>
+                    <!-- Header pastel: logo + judul -->
+                    <Border Background="#FFE0F7FA" CornerRadius="16,16,0,0" Padding="28,20">
+                        <StackPanel>
+                            <Image Source="/Assets/logo-v3netbill.png"
+                                   Height="52"
+                                   Stretch="Uniform"
+                                   HorizontalAlignment="Center"
+                                   Margin="0,0,0,10"/>
+                            <TextBlock Text="LOGIN VOUCHER / MEMBER"
+                                       FontSize="17"
+                                       FontWeight="SemiBold"
+                                       Foreground="#0F172A"
+                                       HorizontalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
 
-                    <TextBlock Text="KODE VOUCHER" Style="{StaticResource FieldCaptionStyle}"/>
-                    <Grid Margin="0,0,0,18">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="46"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-                        <Path Grid.Column="0"
-                              Data="M12,12c2.21,0 4,-1.79 4,-4s-1.79,-4 -4,-4 -4,1.79 -4,4 1.79,4 4,4zM12,14c-2.67,0 -8,1.34 -8,4v2h16v-2c0,-2.66 -5.33,-4 -8,-4z"
-                              Stroke="#8A93A6" StrokeThickness="1.6"
-                              Stretch="Uniform"
-                              Width="20" Height="20"
-                              HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        <TextBox x:Name="KodeTextBox" Grid.Column="1"
-                                 Height="46" FontSize="16"
-                                 VerticalContentAlignment="Center" MaxLength="6"
-                                 Padding="16,0" BorderThickness="1" BorderBrush="#2EFFFFFF"
-                                 Background="{StaticResource FieldInsetBrush}"
-                                 Foreground="White" CaretBrush="#00D4AA"
-                                 Template="{StaticResource PillFieldTemplate}"/>
-                    </Grid>
+                    <StackPanel Margin="26,20,26,24">
 
-                    <TextBlock Text="PASSWORD" Style="{StaticResource FieldCaptionStyle}"/>
-                    <Grid Margin="0,0,0,26">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="46"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-                        <Path Grid.Column="0"
-                              Data="M18,8h-1V6c0,-2.76 -2.24,-5 -5,-5S7,3.24 7,6v2H6c-1.1,0 -2,0.9 -2,2v10c0,1.1 0.9,2 2,2h12c1.1,0 2,-0.9 2,-2V10c0,-1.1 -0.9,-2 -2,-2zM12,17c-1.1,0 -2,-0.9 -2,-2s0.9,-2 2,-2 2,0.9 2,2 -0.9,2 -2,2zM15.1,8H8.9V6c0,-1.71 1.39,-3 3.1,-3s3.1,1.29 3.1,3v2z"
-                              Stroke="#8A93A6" StrokeThickness="1.6"
-                              Stretch="Uniform"
-                              Width="20" Height="20"
-                              HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        <PasswordBox x:Name="PasswordBox" Grid.Column="1"
+                        <!-- Indikator koneksi ke server -->
+                        <StackPanel Orientation="Horizontal"
+                                    HorizontalAlignment="Center"
+                                    Margin="0,0,0,20">
+                            <Ellipse Width="7" Height="7" VerticalAlignment="Center" Margin="0,0,6,0">
+                                <Ellipse.Style>
+                                    <Style TargetType="Ellipse">
+                                        <Setter Property="Fill" Value="#94A3B8"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding ServerStatus}" Value="connected">
+                                                <Setter Property="Fill" Value="#16A34A"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding ServerStatus}" Value="disconnected">
+                                                <Setter Property="Fill" Value="#DC2626"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Ellipse.Style>
+                            </Ellipse>
+                            <TextBlock Text="{Binding ServerStatusText}"
+                                       FontSize="11"
+                                       Foreground="#64748B"
+                                       VerticalAlignment="Center"/>
+                        </StackPanel>
+
+                        <TextBlock Text="KODE VOUCHER"
+                                   HorizontalAlignment="Center"
+                                   Style="{StaticResource FieldCaptionStyle}"/>
+                        <Grid Margin="0,0,0,18">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="46"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Path Grid.Column="0"
+                                  Data="M12,12c2.21,0 4,-1.79 4,-4s-1.79,-4 -4,-4 -4,1.79 -4,4 1.79,4 4,4zM12,14c-2.67,0 -8,1.34 -8,4v2h16v-2c0,-2.66 -5.33,-4 -8,-4z"
+                                  Stroke="#94A3B8"
+                                  StrokeThickness="1.6"
+                                  Stretch="Uniform"
+                                  Width="20" Height="20"
+                                  HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <TextBox x:Name="KodeTextBox" Grid.Column="1"
                                      Height="46" FontSize="16"
-                                     VerticalContentAlignment="Center" MaxLength="4"
-                                     Padding="16,0" BorderThickness="1" BorderBrush="#2EFFFFFF"
+                                     VerticalContentAlignment="Center" MaxLength="6"
+                                     Padding="16,0" BorderThickness="1" BorderBrush="#CBD5E1"
                                      Background="{StaticResource FieldInsetBrush}"
-                                     Foreground="White" CaretBrush="#00D4AA"
-                                     Template="{StaticResource PillPasswordTemplate}"/>
-                    </Grid>
+                                     Foreground="#0F172A" CaretBrush="#00B894"
+                                     Template="{StaticResource PillFieldTemplate}"/>
+                        </Grid>
 
-                    <Button x:Name="LoginButton" 
-                            Content="LOGIN" 
-                            Height="50" 
-                            FontSize="15" FontWeight="Bold"
-                            Background="#00D4AA" 
-                            Foreground="#0C1118" 
-                            BorderThickness="0"
-                            Cursor="Hand"
-                            Click="LoginButton_Click">
-                        <Button.Template>
-                            <ControlTemplate TargetType="Button">
-                                <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="10">
-                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                </Border>
-                                <ControlTemplate.Triggers>
-                                    <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="bd" Property="Background" Value="#00E8BB"/>
-                                    </Trigger>
-                                    <Trigger Property="IsPressed" Value="True">
-                                        <Setter TargetName="bd" Property="Background" Value="#00B8A0"/>
-                                    </Trigger>
-                                    <Trigger Property="IsEnabled" Value="False">
-                                        <Setter TargetName="bd" Property="Background" Value="#2A3040"/>
-                                        <Setter Property="Foreground" Value="#5A6478"/>
-                                    </Trigger>
-                                </ControlTemplate.Triggers>
-                            </ControlTemplate>
-                        </Button.Template>
-                    </Button>
+                        <TextBlock Text="PASSWORD"
+                                   HorizontalAlignment="Center"
+                                   Style="{StaticResource FieldCaptionStyle}"/>
+                        <Grid Margin="0,0,0,24">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="46"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Path Grid.Column="0"
+                                  Data="M18,8h-1V6c0,-2.76 -2.24,-5 -5,-5S7,3.24 7,6v2H6c-1.1,0 -2,0.9 -2,2v10c0,1.1 0.9,2 2,2h12c1.1,0 2,-0.9 2,-2V10c0,-1.1 -0.9,-2 -2,-2zM12,17c-1.1,0 -2,-0.9 -2,-2s0.9,-2 2,-2 2,0.9 2,2 -0.9,2 -2,2zM15.1,8H8.9V6c0,-1.71 1.39,-3 3.1,-3s3.1,1.29 3.1,3v2z"
+                                  Stroke="#94A3B8"
+                                  StrokeThickness="1.6"
+                                  Stretch="Uniform"
+                                  Width="20" Height="20"
+                                  HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <PasswordBox x:Name="PasswordBox" Grid.Column="1"
+                                         Height="46" FontSize="16"
+                                         VerticalContentAlignment="Center" MaxLength="4"
+                                         Padding="16,0" BorderThickness="1" BorderBrush="#CBD5E1"
+                                         Background="{StaticResource FieldInsetBrush}"
+                                         Foreground="#0F172A" CaretBrush="#00B894"
+                                         Template="{StaticResource PillPasswordTemplate}"/>
+                        </Grid>
 
-                    <TextBlock x:Name="ErrorText" 
-                               Text="" 
-                               FontSize="13" 
-                               Foreground="#FF6B6B" 
-                               HorizontalAlignment="Center" 
-                               Margin="0,14,0,0"
-                               Visibility="Collapsed"/>
+                        <Button x:Name="LoginButton"
+                                Content="LOGIN"
+                                Height="50"
+                                FontSize="15" FontWeight="Bold"
+                                Background="#00D4AA"
+                                Foreground="#08312B"
+                                BorderThickness="0"
+                                Cursor="Hand"
+                                Click="LoginButton_Click">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="10">
+                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="bd" Property="Background" Value="#00E8BB"/>
+                                        </Trigger>
+                                        <Trigger Property="IsPressed" Value="True">
+                                            <Setter TargetName="bd" Property="Background" Value="#00B8A0"/>
+                                        </Trigger>
+                                        <Trigger Property="IsEnabled" Value="False">
+                                            <Setter TargetName="bd" Property="Background" Value="#E2E8F0"/>
+                                            <Setter Property="Foreground" Value="#94A3B8"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Button.Template>
+                        </Button>
+
+                        <TextBlock x:Name="ErrorText"
+                                   Text=""
+                                   FontSize="13"
+                                   Foreground="#DC2626"
+                                   HorizontalAlignment="Center"
+                                   Margin="0,14,0,0"
+                                   Visibility="Collapsed"/>
+                    </StackPanel>
                 </StackPanel>
             </Border>
 
-
-
             <!-- Technician PIN Dialog (hidden by default) -->
-            <Border x:Name="PinDialog" 
-                    Background="#E61E1E24" 
-                    CornerRadius="16" 
+            <Border x:Name="PinDialog"
+                    Background="#FFFFFFFF"
+                    BorderBrush="#E2E8F0" BorderThickness="1"
+                    CornerRadius="16"
                     Padding="32"
                     Visibility="Collapsed">
                 <StackPanel>
-                    <TextBlock Text="MODE TEKNISI" 
-                               FontSize="18" FontWeight="Bold" 
-                               Foreground="#FFD700" 
+                    <TextBlock Text="MODE TEKNISI"
+                               FontSize="18" FontWeight="Bold"
+                               Foreground="#CA8A04"
                                HorizontalAlignment="Center" Margin="0,0,0,8"/>
-                    <TextBlock Text="Masukkan PIN untuk akses desktop" 
-                               FontSize="14" 
-                               Foreground="#AAAAAA" 
+                    <TextBlock Text="Masukkan PIN untuk akses desktop"
+                               FontSize="14"
+                               Foreground="#64748B"
                                HorizontalAlignment="Center" Margin="0,0,0,10"/>
 
-                    <Button x:Name="OtpButton" Content="KIRIM OTP KE TELEGRAM" 
+                    <Button x:Name="OtpButton" Content="KIRIM OTP KE TELEGRAM"
                             Width="220" Height="36"
-                            Background="#1F7A8C" Foreground="White" FontWeight="Bold" BorderThickness="0"
+                            Background="#E0F7FA" Foreground="#0F172A" FontWeight="Bold" BorderThickness="0"
                             Margin="0,0,0,16" HorizontalAlignment="Center"
                             Click="OtpButton_Click"/>
 
-                    <PasswordBox x:Name="PinBox" 
-                                 Width="200" Height="40" FontSize="18" 
+                    <PasswordBox x:Name="PinBox"
+                                 Width="200" Height="40" FontSize="18"
                                  VerticalContentAlignment="Center" MaxLength="6"
-                                 Padding="8,0" BorderThickness="1" BorderBrush="#444"
-                                 Background="#111" Foreground="White" CaretBrush="#FFD700"
+                                 Padding="8,0" BorderThickness="1" BorderBrush="#CBD5E1"
+                                 Background="#FFFFFF" Foreground="#0F172A" CaretBrush="#CA8A04"
                                  HorizontalAlignment="Center"/>
 
-                    <TextBlock x:Name="PinHintText" 
-                               Text="" FontSize="13" Foreground="#FFD700"
+                    <TextBlock x:Name="PinHintText"
+                               Text="" FontSize="13" Foreground="#CA8A04"
                                HorizontalAlignment="Center" Margin="0,10,0,0"
                                Visibility="Collapsed"/>
 
-                    <Button x:Name="StopAgentButton" Content="STOP AGENT (DARURAT)" 
+                    <Button x:Name="StopAgentButton" Content="STOP AGENT (DARURAT)"
                             Width="220" Height="40"
                             Background="#C62828" Foreground="White" FontWeight="Bold" BorderThickness="0"
                             Margin="0,16,0,0" HorizontalAlignment="Center"
                             Visibility="Collapsed" Click="StopAgentButton_Click"/>
 
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,16,0,0">
-                        <Button x:Name="PinOkButton" Content="OK" Width="80" Height="36" 
-                                Background="#FFD700" Foreground="#111" FontWeight="Bold" BorderThickness="0" Margin="0,0,12,0"
+                        <Button x:Name="PinOkButton" Content="OK" Width="80" Height="36"
+                                Background="#CA8A04" Foreground="#FFFFFF" FontWeight="Bold" BorderThickness="0" Margin="0,0,12,0"
                                 Click="PinOkButton_Click"/>
-                        <Button x:Name="PinCancelButton" Content="BATAL" Width="80" Height="36" 
-                                Background="#444" Foreground="White" FontWeight="Bold" BorderThickness="0"
+                        <Button x:Name="PinCancelButton" Content="BATAL" Width="80" Height="36"
+                                Background="#FFFFFF" Foreground="#334155" FontWeight="Bold" BorderThickness="1"
+                                BorderBrush="#CBD5E1"
                                 Click="PinCancelButton_Click"/>
                     </StackPanel>
                 </StackPanel>
@@ -260,36 +296,30 @@
                  saat sesi berjalan, bukan dari layar login. -->
 
         <!-- Mini countdown window (visible while session active, desktop usable) — gaya Uiverse (navy + gradient cyan) -->
-        <Border x:Name="MiniPanel" 
-                Background="#FF161A24" 
-                CornerRadius="12" 
-                BorderBrush="#3D00D4AA" BorderThickness="1"
-                HorizontalAlignment="Right" 
-                VerticalAlignment="Top" 
+        <Border x:Name="MiniPanel"
+                Background="#FFFFFFFF"
+                CornerRadius="16"
+                BorderBrush="#E2E8F0" BorderThickness="1"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Top"
                 Margin="16"
                 Visibility="Collapsed">
             <Border.Effect>
-                <DropShadowEffect BlurRadius="24" ShadowDepth="4" Opacity="0.5" Color="#00D4AA"/>
+                <DropShadowEffect BlurRadius="24" ShadowDepth="4" Opacity="0.16" Color="#0F172A"/>
             </Border.Effect>
             <StackPanel Width="300">
                 <!-- Header: strip gradien cyan gaya Uiverse -->
-                <Border CornerRadius="12,12,0,0" Padding="14,10,6,10">
-                    <Border.Background>
-                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                            <GradientStop Color="#049FBB" Offset="0"/>
-                            <GradientStop Color="#50F6FF" Offset="1"/>
-                        </LinearGradientBrush>
-                    </Border.Background>
+                <Border Background="#FFE0F7FA" CornerRadius="16,16,0,0" Padding="16,12,8,12">
                     <Grid>
                         <TextBlock Text="V3 NETBILL — SESI AKTIF"
-                                   FontSize="12" FontWeight="Bold"
-                                   Foreground="#1B233D"
+                                   FontSize="11" FontWeight="Bold"
+                                   Foreground="#0F172A"
                                    VerticalAlignment="Center"/>
                         <Button x:Name="MinimizeMiniButton"
                                 Content="&#x2013;"
                                 Width="26" Height="26"
                                 FontSize="16" FontWeight="Bold"
-                                Background="#331B233D" Foreground="#1B233D"
+                                Background="#FFFFFFFF" Foreground="#64748B"
                                 BorderThickness="0" Cursor="Hand"
                                 HorizontalAlignment="Right"
                                 Click="MinimizeMiniButton_Click">
@@ -300,7 +330,7 @@
                                     </Border>
                                     <ControlTemplate.Triggers>
                                         <Trigger Property="IsMouseOver" Value="True">
-                                            <Setter TargetName="mbd" Property="Background" Value="#661B233D"/>
+                                            <Setter TargetName="mbd" Property="Background" Value="#E2E8F0"/>
                                         </Trigger>
                                     </ControlTemplate.Triggers>
                                 </ControlTemplate>
@@ -309,7 +339,7 @@
                     </Grid>
                 </Border>
 
-                <Border Background="#FF161A24" CornerRadius="0,0,12,12" Padding="14,14,14,14">
+                <Border Background="#FFFFFFFF" CornerRadius="0,0,16,16" Padding="16,14,16,14">
                     <StackPanel>
                         <!-- Baris utama: lingkaran tombol stop (gaya album-cover) + identitas -->
                         <Grid>
@@ -360,10 +390,10 @@
                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="14,0,0,0">
                                 <TextBlock Text="AKUN"
                                            FontSize="10" FontWeight="SemiBold"
-                                           Foreground="#00D4AA"/>
+                                           Foreground="#64748B"/>
                                 <TextBlock Text="{Binding AkunLabel}"
                                            FontSize="16" FontWeight="Bold"
-                                           Foreground="#FFFFFF"
+                                           Foreground="#0F172A"
                                            TextTrimming="CharacterEllipsis"
                                            Margin="0,2,0,0"/>
                             </StackPanel>
@@ -373,14 +403,14 @@
                              Berpindah ke bawah karena lingkaran dipakai tombol stop. -->
                         <TextBlock Text="{Binding CountdownText}"
                                    FontSize="46" FontWeight="Bold"
-                                   Foreground="#00D4AA"
+                                   Foreground="#0F172A"
                                    FontFamily="Consolas, Courier New, monospace"
                                    HorizontalAlignment="Center"
                                    Margin="0,6,0,0"/>
 
                         <!-- Timeline 4px, warna ikut sisa waktu. Nilai tetap dari
                              ProgressPercent server, bukan animasi dekoratif. -->
-                        <Border Height="4" CornerRadius="2" Background="#252B3D"
+                        <Border Height="4" CornerRadius="2" Background="#E2E8F0"
                                 Margin="2,8,2,0" ClipToBounds="True">
                             <ProgressBar x:Name="MiniProgressBar"
                                          Style="{StaticResource TimelineStyle}"
@@ -402,10 +432,10 @@
                                 Click="BuatPasswordButton_Click">
                             <Button.Style>
                                 <Style TargetType="Button">
-                                    <Setter Property="Foreground" Value="#6B7A94"/>
+                                    <Setter Property="Foreground" Value="#64748B"/>
                                     <Style.Triggers>
                                         <Trigger Property="IsMouseOver" Value="True">
-                                            <Setter Property="Foreground" Value="#00D4AA"/>
+                                            <Setter Property="Foreground" Value="#00B894"/>
                                         </Trigger>
                                     </Style.Triggers>
                                 </Style>
@@ -420,7 +450,7 @@
 
                         <!-- Status / pesan error -->
                         <TextBlock x:Name="MiniStatusText"
-                                   FontSize="12" Foreground="#FFD166"
+                                   FontSize="12" Foreground="#CA8A04"
                                    HorizontalAlignment="Center"
                                    Margin="2,8,2,0"
                                    TextWrapping="Wrap"
@@ -443,10 +473,10 @@
                 Click="AdminPinButton_Click">
             <Button.Style>
                 <Style TargetType="Button">
-                    <Setter Property="Foreground" Value="#45FFFFFF"/>
+                    <Setter Property="Foreground" Value="#450F172A"/>
                     <Style.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter Property="Foreground" Value="#99FFFFFF"/>
+                            <Setter Property="Foreground" Value="#990F172A"/>
                         </Trigger>
                     </Style.Triggers>
                 </Style>

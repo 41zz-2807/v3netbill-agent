@@ -38,6 +38,10 @@ public partial class MainWindow : Window
     private readonly IConfiguration _config;
     private CancellationTokenSource? _cts;
     private MemoryStream? _wallpaperStream;
+    // True kalau wallpaper benar-benar berhasil dimuat. Veil putih hanya
+    // ditampilkan kalau ada gambar di bawahnya — kalau tidak, latarnya sudah
+    // berupa gradien terang dan veil tidak ada gunanya.
+    private bool _wallpaperDimuat;
     private bool _emergencyExit;
     private DispatcherTimer? _countdownTimer;
     private BuatPasswordDialogWindow? _dialogGantiPassword;
@@ -145,6 +149,9 @@ public partial class MainWindow : Window
             Dispatcher.Invoke(() =>
             {
                 OverlayBackground.Background = new ImageBrush(bitmap) { Stretch = Stretch.UniformToFill };
+                _wallpaperDimuat = true;
+                // Veil langsung ikut status shown/collapsed-nya overlay.
+                SinkronkanVeil();
             });
             AgentLog.Write($"Wallpaper diterapkan ({bytes.Length} bytes)");
             _logger.LogInformation("Wallpaper diterapkan ({N} bytes)", bytes.Length);
@@ -153,6 +160,19 @@ public partial class MainWindow : Window
         {
             _logger.LogWarning(ex, "Gagal memuat wallpaper");
         }
+    }
+
+    /// <summary>
+    /// Veil ikut mengikuti apakah overlay sedang tampil. Kalau disembunyikan
+    /// tanpa wallpaper pun tetap aman: saat di-lock dia ikut Visible,
+    /// jadi tidak pernah ada wallpaper yang tergambar tanpa veil.
+    /// </summary>
+    private void SinkronkanVeil()
+    {
+        bool tampil = OverlayBackground.Visibility == Visibility.Visible;
+        WallpaperVeil.Visibility = (tampil && _wallpaperDimuat)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
@@ -194,6 +214,7 @@ public partial class MainWindow : Window
         {
             // Fullscreen login (idle)
             OverlayBackground.Visibility = Visibility.Visible;
+            SinkronkanVeil();
             ContentPanel.Visibility = Visibility.Visible;
             LoginCard.Visibility = Visibility.Visible;
             MiniPanel.Visibility = Visibility.Collapsed;

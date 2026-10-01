@@ -6,10 +6,10 @@
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize"
         WindowStyle="SingleBorderWindow"
-        Background="#FF1B233D"
+        Background="#FFFFFFFF"
         Closing="OnClosing">
     <Window.Effect>
-        <DropShadowEffect BlurRadius="20" ShadowDepth="2" Opacity="0.5" Color="#049FBB"/>
+        <DropShadowEffect BlurRadius="20" ShadowDepth="2" Opacity="0.18" Color="#0F172A"/>
     </Window.Effect>
     <Grid>
         <Grid.RowDefinitions>
@@ -17,32 +17,26 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <!-- Header gradient -->
-        <Border CornerRadius="0" Padding="18,14,18,14">
-            <Border.Background>
-                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                    <GradientStop Color="#049FBB" Offset="0"/>
-                    <GradientStop Color="#50F6FF" Offset="1"/>
-                </LinearGradientBrush>
-            </Border.Background>
+        <!-- Header pastel, sama seperti kartu login -->
+        <Border CornerRadius="0" Padding="18,14,18,14" Background="#FFE0F7FA">
             <StackPanel>
-                <TextBlock Text="Uninstall Agent" FontSize="18" FontWeight="Bold" Foreground="#1B233D"/>
-                <TextBlock Text="v3Netbill Warnet Billing" FontSize="12" Foreground="#08303D" Margin="0,2,0,0"/>
+                <TextBlock Text="Uninstall Agent" FontSize="18" FontWeight="Bold" Foreground="#0F172A"/>
+                <TextBlock Text="v3Netbill Warnet Billing" FontSize="12" Foreground="#64748B" Margin="0,2,0,0"/>
             </StackPanel>
         </Border>
 
         <StackPanel Grid.Row="1" Margin="22,16,22,20">
             <TextBlock Text="Masukkan PIN admin (PIN Uninstall) untuk melanjutkan penghapusan agent."
-                       FontSize="13" Foreground="#C9D6F0" TextWrapping="Wrap"/>
+                       FontSize="13" Foreground="#334155" TextWrapping="Wrap"/>
             <TextBlock Text="PIN diverifikasi ke server billing. Uninstall dibatalkan bila PIN salah."
-                       FontSize="11" Foreground="#9FB2D8" TextWrapping="Wrap" Margin="0,6,0,12"/>
+                       FontSize="11" Foreground="#64748B" TextWrapping="Wrap" Margin="0,6,0,12"/>
 
-            <TextBlock Text="PIN Uninstall" FontSize="11" FontWeight="SemiBold" Foreground="#50F6FF"/>
+            <TextBlock Text="PIN Uninstall" FontSize="11" FontWeight="SemiBold" Foreground="#00B894"/>
             <PasswordBox x:Name="PinBox"
                          Height="34"
                          FontSize="14"
-                         Background="#0F1730"
-                         Foreground="#FFFFFF"
+                         Background="#FFFFFF"
+                         Foreground="#0F172A"
                          BorderBrush="#50F6FF"
                          BorderThickness="1"
                          Padding="8,0,8,0"
@@ -60,7 +54,7 @@
                         Content="Batal"
                         Width="110" Height="36"
                         FontSize="13" FontWeight="Bold"
-                        Background="#28324E" Foreground="#FFFFFF"
+                        Background="#28324E" Foreground="#0F172A"
                         BorderThickness="0" Cursor="Hand"
                         Margin="0,0,10,0"
                         Click="OnCancel"/>
@@ -68,7 +62,7 @@
                         Content="Hapus Agent"
                         Width="130" Height="36"
                         FontSize="13" FontWeight="Bold"
-                        Background="#049FBB" Foreground="#1B233D"
+                        Background="#049FBB" Foreground="#0F172A"
                         BorderThickness="0" Cursor="Hand"
                         IsDefault="True"
                         Click="OnVerify"/>
