@@ -194,7 +194,29 @@
     <!-- ===== Verifikasi PIN sebelum uninstall berjalan (Type 18 exe CA).
          Menjalankan Agent.Overlay.exe uninstall-guard tepat sebelum RemoveFiles.
          Exit 0 = lanjut, non-zero = batal uninstall. Hanya uninstall murni
-         (REMOVE="ALL"), TIDAK saat major upgrade (UPGRADINGPRODUCTCODE). ===== -->
+         (REMOVE="ALL"), TIDAK saat major upgrade (UPGRADINGPRODUCTCODE).
+
+         ⚠️ V3PINVERIFIED: set oleh uninstall-old-agent.bat lewat
+            `msiexec /x {code} V3PINVERIFIED=1`.
+
+         Kenapa perlu. Tanpa ini PIN diminta DUA KALI: sekali di .bat, lalu
+         lagi di sini. Orang yang batal di dialog kedua berakhir dengan
+         keadaan setengah terpasang — .bat menganggap uninstall "gagal tapi
+         tetap jalan" lalu menghapus registry, sementara produk MSI masih
+         terdaftar. Akibatnya agent kehilangan PcId dan AgentToken, dan tidak
+         bisa menemukan server lagi.
+
+         Dengan property ini, .bat menjadi satu-satunya gerbang PIN. Yang
+         membatalkan di dialog kedua skrip .bat, bukan lagi dialog kedua.
+         Direct uninstall dari Apps & Features tetap aman: tanpa property
+         itu, dialog PIN tetap muncul.
+
+         Sengaja TIDAK diberi Secure="yes". Nilai ini bukan rahasia, dan
+         `Secure` mensyaratkan juga mendaftarkan property itu di
+         `SecureCustomProperties` agar diteruskan — satu langkah lagi yang
+         bisa menggagalkan seluruh mekanisme. ===== -->
+    <Property Id="V3PINVERIFIED" />
+
     <CustomAction Id="UninstallGuardAction"
                   FileRef="AgentOverlayExeFile"
                   ExeCommand="--uninstall-guard"
@@ -203,7 +225,7 @@
 
     <InstallExecuteSequence>
       <Custom Action="UninstallGuardAction" Before="RemoveFiles"
-              Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+              Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND NOT V3PINVERIFIED" />
     </InstallExecuteSequence>
 
     <!-- ===== Shortcuts (start menu): shortcut "Uninstall v3Netbill Agent" di

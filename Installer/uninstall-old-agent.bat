@@ -117,13 +117,9 @@ if "%PIN_RESULT%"=="6" (
 if "%PIN_RESULT%"=="4" (
   echo [STOP] Server tetap tidak bisa dihubungi, jadi PIN tidak terverifikasi.
   echo        Uninstall dibatalkan dan service TIDAK dihentikan.
-  echo.
-  echo        Untuk uninstall paksa, jalankan dari prompt Admin:
-  echo          sc stop v3NetbillAgent
-  echo          sc delete v3NetbillAgent
-  echo        lalu hapus folder %ProgramFiles%\v3NetbillAgent
   goto :abort
 )
+:: Teks jalan keluar dicetak oleh :abort untuk semua cabang di atas.
 echo [STOP] Verifikasi PIN gagal dengan kode %PIN_RESULT%. Uninstall dibatalkan.
 goto :abort
 
@@ -131,10 +127,12 @@ goto :abort
 echo.
 echo Service TIDAK dihentikan. Billing berjalan seperti biasa.
 echo.
-echo Kalau registry agent sudah hilang, uninstall tidak bisa diverifikasi.
-echo Install ulang MSI lebih dulu supaya PcId dan AgentToken terisi,
-echo atau jalankan perintah hapus manual yang tertulis di README.
+echo Uninstall tidak bisa diverifikasi tanpa PcId dan AgentToken.
+echo Pasang ulang MSI lebih dulu supaya keduanya terisi, lalu jalankan
+echo .bat ini sekali lagi. Setelah itu isi PcId dan AgentToken akan diambil
+echo otomatis dari registry.
 echo.
+call :jalan_keluar
 pause
 exit /b 1
 
@@ -179,8 +177,30 @@ exit /b 0
 echo.
 echo Service TIDAK dihentikan. Billing berjalan seperti biasa.
 echo.
+call :jalan_keluar
 pause
 exit /b 1
+
+:: ============================================================
+::  Helper: penjelasan jalan keluar.
+::
+::  WAJIB ada di SETIAP cabang penolakan. Versi pertama hanya menunjukkannya
+::  untuk satu kasus ("server tidak terjangkau"), sehingga PIN yang dikosongkan
+::  atau salah hanya menghasilkan "uninstall dibatalkan" tanpa ada yang bisa
+::  dilakukan. Owner PC bukan korban; dia harus selalu bisa mencabut agentnya.
+:: ============================================================
+:jalan_keluar
+echo.
+echo  CARA MENCABUT AGENT SECARA PAKSA (prompt Admin):
+echo    schtasks /Delete /TN "\v3Netbill\Agent Watchdog" /F
+echo    sc stop v3NetbillAgent
+echo    sc delete v3NetbillAgent
+echo    rd /s /q "%ProgramFiles(x86)%\v3NetbillAgent"
+echo    rd /s /q "%ProgramFiles%\v3NetbillAgent"
+echo.
+echo  Task watchdog dihapus lebih dulu. Kalau tidak, ia akan menghidupkan
+echo  lagi service dalam satu menit.
+exit /b 0
 
 :: ============================================================
 ::  LANGKAH 3 - PIN valid. Baru sekarang service boleh dihentikan.
@@ -204,19 +224,53 @@ taskkill /F /IM Agent.Overlay.exe >nul 2>&1
 taskkill /F /IM Agent.Service.exe >nul 2>&1
 echo [OK] proses agent dihentikan
 
+:: ============================================================
+::  JAGA-YANG: registry harus masih utuh sebelum langkah destruktif.
+::
+::  Ini yang protects dari kejadian 2 Okt 2026: msiexec dibatalkan di dialog
+::  PIN kedua, tapi skrip tetap melanjutkan ke penghapusan registry, sehingga
+::  PcId + AgentToken hilang sementara produk MSI masih terdaftar. Agent
+::  kemudian tidak bisa menemukan server lagi.
+:: ============================================================
+set "V3_PCSEKARANG="
+for /f "tokens=2,*" %%A in ('reg query "HKLM\Software\v3Netbill\Agent" /v PcId 2^>nul ^| find "REG_SZ"') do set "V3_PCSEKARANG=%%B"
+if not defined V3_PCSEKARANG (
+  echo.
+  echo [STOP] Registry agent tidak ada lagi: PcId dan AgentToken hilang.
+  echo        Yang tersisa hanya hapus file. Lanjutkan? (y/N)
+  set /p "V3_LANJUT="
+  if /i not "%V3_LANJUT%"=="y" (
+    echo Dibatalkan. Tidak ada yang dihapus.
+    goto :abort
+  )
+) else (
+  if not "%V3_PCSEKARANG%"=="%V3_PCID%" (
+    echo.
+    echo [STOP] PcId di registry berubah sejak PIN diverifikasi.
+    echo       Hubungan PcId tidak aman untuk melanjutkan. Batal.
+    goto :abort
+  )
+)
+
 :: 3d) Cari Product Code MSI lalu uninstall resmi
 set "PRODUCTCODE="
 for /f "delims=" %%G in ('powershell -NoProfile -Command "$s=Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq 'v3Netbill Agent' } | Select-Object -First 1; if($s){ (Split-Path $s.PSPath -Leaf).Trim('{}') }"') do set "PRODUCTCODE=%%G"
 
 if defined PRODUCTCODE (
   echo [MSI] product code ditemukan : {!PRODUCTCODE!}
-  echo [MSI] menjalankan msiexec /x ...
-  msiexec /x {!PRODUCTCODE!} /qn /norestart
+  echo [MSI] menjalankan msiexec /x (PIN sudah diverifikasi, tidak asking lagi) ...
+  :: V3PINVERIFIED=1 membuat MSI melewati dialog PIN-nya sendiri. Tanpa itu
+  :: PIN diminta dua kali, dan membatalkan yang kedua stranded Agent.
+  msiexec /x {!PRODUCTCODE!} /qn /norestart V3PINVERIFIED=1
   if errorlevel 1 (
-    echo [WARN] msiexec selesai dengan kode error - lanjut hapus manual.
-  ) else (
-    echo [OK] MSI uninstall selesai.
+    echo.
+    echo [STOP] msiexec /x GAGAL. Uninstall dibatalkan di sini.
+    echo        Service, folder, dan registry TIDAK disentuh — agent masih utuh.
+    echo.
+    echo        Coba lagi lewat Apps & Features, atau jalankan .bat ini sekali lagi.
+    goto :abort
   )
+  echo [OK] MSI uninstall selesai.
 ) else (
   echo [i] product code tidak ditemukan - lanjut hapus manual.
 )
