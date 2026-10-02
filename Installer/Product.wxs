@@ -91,9 +91,6 @@
          — dan itu memang lebih baik daripada MSI yang terpasang tapi tidak
          konek. Step "Verify MSI contents" juga memeriksa nilainya. -->
     <Property Id="SERVER_URL" Value="$(var.SERVER_URL)" />
-    <!-- Waktu build, diisi workflow lewat -d INSTALL_UTC. Dipakai sebagai
-         cap sehingga dua MSI dengan versi sama masih bisa dibedakan. -->
-    <Property Id="INSTALL_UTC" Value="$(var.INSTALL_UTC)" />
     <Property Id="PC_ID" Value="PC001">
       <RegistrySearch Id="PrefillPcId" Root="HKLM" Key="Software\v3Netbill\Agent" Name="PcId" Type="raw" />
     </Property>
@@ -175,17 +172,30 @@
           <RegistryValue Name="ServerUrl" Type="string" Value="[SERVER_URL]" KeyPath="yes" />
           <RegistryValue Name="PcId" Type="string" Value="[PC_ID]" />
           <RegistryValue Name="AgentToken" Type="string" Value="[AGENT_TOKEN]" />
-          <!-- ⚠️ Ditulis OTOMATIS dari Product/@Version, tidak diketik manual.
+          <!-- Nomor versi ditulis OTOMATIS dari Product/@Version lewat
+               [ProductVersion], jadi tidak bisa lupa diisi atau tertinggal.
+
                Tujuannya satu: nomor versi harus bisa dicek langsung di PC.
-               Selama ini semua MSI tercatat "1.0.9.0" dan mustahil diketahui
-               mana yang benar-benar terpasang.
+               Selama ini semua MSI tercatat "1.0.9.0" padahal dibangun ulang
+               berkali-kali, jadi mustahil diketahui mana yang terpasang.
+
                  reg query "HKLM\SOFTWARE\v3Netbill\Agent" /v AgentVersion
-               [ProductVersion] adalah properti bawaan MSI yang berisi
-               nilai Version di atas, jadi tidak bisa lupa/latest. -->
+
+               ⚠️ JANGAN mengetik nomor versi di sini. Isi dari [ProductVersion]
+               supaya satu sumber kebenaran saja. -->
           <RegistryValue Name="AgentVersion" Type="string" Value="[ProductVersion]" />
-          <!-- Dipasang sekali di build ini; dipakai diagnosa dan
-               uninstall-old-agent.bat agar tahu pernah ada build sebelumnya. -->
-          <RegistryValue Name="InstalledBuildUtc" Type="string" Value="[INSTALL_UTC]" />
+
+          <!-- Kapan paket ini dipasang, memakai InstallDate bawaan MSI yang
+               selalu terisi.
+
+               Dulu dicoba memakai cap build lewat `wix build -d INSTALL_UTC=...`,
+               dan itu merusak build di CI: `-d` hanya membuat preprocessor
+               variable, nilainya kosong, sampai WIX0006. Yang dipakai harus
+               properti MSI sungguhan.
+
+                 reg query "HKLM\SOFTWARE\v3Netbill\Agent" /v InstalledBuildUtc -->
+          <RegistryValue Name="InstalledBuildUtc" Type="string" Value="[InstallDate]" />
+
         </RegistryKey>
         <CreateFolder />
       </Component>
@@ -241,11 +251,13 @@
          Direct uninstall dari Apps & Features tetap aman: tanpa property
          itu, dialog PIN tetap muncul.
 
-         Sengaja TIDAK diberi Secure="yes". Nilai ini bukan rahasia, dan
-         `Secure` mensyaratkan juga mendaftarkan property itu di
-         `SecureCustomProperties` agar diteruskan — satu langkah lagi yang
-         bisa menggagalkan seluruh mekanisme. ===== -->
-    <Property Id="V3PINVERIFIED" />
+         ⚠️ Property-nya SENGAJA TIDAK dideklarasikan lewat elemen
+         <Property>. WiX v4 memberi WIX1006 dan MENGABAIKAN elemen itu
+         kalau tidak punya Value dan tidak ditandai Admin/Secure/Hidden —
+         artinya .bat mengirim V3PINVERIFIED=1 tapi MSI tidak pernah
+         memperhatikannya, dan PIN tetap diminta dua kali.
+         Public property yang dikirim baris perintah otomatis dibuat oleh
+         installer, jadi tidak perlu deklarasi sama sekali. ===== -->
 
     <CustomAction Id="UninstallGuardAction"
                   FileRef="AgentOverlayExeFile"

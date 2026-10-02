@@ -26,9 +26,6 @@ env:
   # Fallback ke domain publik dipakai kalau variable repo belum diisi.
   SERVER_URL: ${{ vars.SERVER_URL }}
 
-  # Cap waktu build, ditulis ke registry PC sebagai InstalledBuildUtc. Dua MSI
-  # dengan Product/@Version sama masih bisa dibedakan lewat nilai ini.
-  INSTALL_UTC: ${{ github.run_number }}-${{ github.run_attempt }}
 
 jobs:
   build-agent:
@@ -165,7 +162,6 @@ jobs:
             -d OverlayDepDir="$ws/artifacts/Agent.Overlay\" `
             -d licenseRtf="$ws/Installer/license.rtf" `
             -d SERVER_URL="${{ env.SERVER_URL }}" `
-            -d INSTALL_UTC="$INSTALL_UTC" `
             -ext WixToolset.UI.wixext `
             -o "$ws/artifacts/${{ env.MSI_OUT }}"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
