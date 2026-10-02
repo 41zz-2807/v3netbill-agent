@@ -26,6 +26,10 @@ env:
   # Fallback ke domain publik dipakai kalau variable repo belum diisi.
   SERVER_URL: ${{ vars.SERVER_URL }}
 
+  # Cap waktu build, ditulis ke registry PC sebagai InstalledBuildUtc. Dua MSI
+  # dengan Product/@Version sama masih bisa dibedakan lewat nilai ini.
+  INSTALL_UTC: ${{ github.run_number }}-${{ github.run_attempt }}
+
 jobs:
   build-agent:
     name: Build Agent (Windows)
@@ -161,6 +165,7 @@ jobs:
             -d OverlayDepDir="$ws/artifacts/Agent.Overlay\" `
             -d licenseRtf="$ws/Installer/license.rtf" `
             -d SERVER_URL="${{ env.SERVER_URL }}" `
+            -d INSTALL_UTC="$INSTALL_UTC" `
             -ext WixToolset.UI.wixext `
             -o "$ws/artifacts/${{ env.MSI_OUT }}"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -206,6 +211,21 @@ jobs:
           $actual = ""
           if ($recP = $viewP.Fetch()) { $actual = "$($recP.StringData(1))" }
           $viewP.Close()
+          # --- Product/@Version WAJIB dinaikkan ---
+          # MSI ini dibuild ulang berkali-kali tanpa menaikkan versi, jadi
+          # semuanya tercatat "1.0.9.0" dan mustahil diketahui mana yang
+          # benar-benar terpasang di PC. Step ini gagal kalau masih basi.
+          $viewV = $db.OpenView("SELECT Value FROM Property WHERE Property = 'Version'")
+          $viewV.Execute()
+          $versi = ""
+          if ($recV = $viewV.Fetch()) { $versi = "$($recV.StringData(1))" }
+          $viewV.Close()
+          Write-Host "Version di MSI: '$versi'"
+          if ($versi -eq '1.0.9.0') {
+            Write-Error "Product/@Version masih 1.0.9.0. Naikkan di Installer/Product.wxs."
+            exit 1
+          }
+
           Write-Host "SERVER_URL di MSI: '$actual' (harapan: '$expected')"
           if ([string]::IsNullOrWhiteSpace($actual) -or $actual -eq 'http://localhost:3000') {
             Write-Error "SERVER_URL di MSI kosong atau masih localhost:3000. Agent tidak akan konek. Set GitHub Actions variable SERVER_URL."

@@ -19,9 +19,25 @@
           OverlayDepFiles.wxs (cg OverlayDepComponents, dr OVERLAYFOLDER)
        ============================================================ -->
 
+  <!-- ================= VERSION =================
+       ⚠️ WAJIB dinaikkan setiap ada perubahan agent. Angka ini satu-satunya
+          pembeda antara MSI lama dan MSI baru, dan sekarang juga ditulis ke
+          registry sebagai "AgentVersion" supaya bisa dicek langsung di PC:
+
+            reg query "HKLM\SOFTWARE\v3Netbill\Agent" /v AgentVersion
+
+          Kenapa penting: MSI ini dibuild ulang berkali-kali tanpa menaikkan
+          versi, jadi semuanya tercatat sebagai "1.0.9.0" dan mustahil
+          diketahui mana yang terpasang. Step "Verify MSI contents" di
+          build-agent.yml sekarang GAGAL kalau versi ini masih 1.0.9.0 —
+          jadi lupa menaikkan tidak bisa lolos ke artifact.
+
+          Format MSI: major.minor.build.revision, tiap bagian 0-255, dan
+          build dibandingkan SEBELUM revision. 1.0.10.0 > 1.0.9.0 ✓
+       ============================================= -->
   <Package UpgradeCode="7f3a9b1e-5c2d-4a8f-9e1b-3d6c8f4a2b7e"
            Name="v3Netbill Agent"
-           Version="1.0.9.0"
+           Version="1.0.10.0"
            Manufacturer="v3Netbill"
            Language="1033"
            Codepage="65001"
@@ -75,6 +91,9 @@
          — dan itu memang lebih baik daripada MSI yang terpasang tapi tidak
          konek. Step "Verify MSI contents" juga memeriksa nilainya. -->
     <Property Id="SERVER_URL" Value="$(var.SERVER_URL)" />
+    <!-- Waktu build, diisi workflow lewat -d INSTALL_UTC. Dipakai sebagai
+         cap sehingga dua MSI dengan versi sama masih bisa dibedakan. -->
+    <Property Id="INSTALL_UTC" Value="$(var.INSTALL_UTC)" />
     <Property Id="PC_ID" Value="PC001">
       <RegistrySearch Id="PrefillPcId" Root="HKLM" Key="Software\v3Netbill\Agent" Name="PcId" Type="raw" />
     </Property>
@@ -156,6 +175,17 @@
           <RegistryValue Name="ServerUrl" Type="string" Value="[SERVER_URL]" KeyPath="yes" />
           <RegistryValue Name="PcId" Type="string" Value="[PC_ID]" />
           <RegistryValue Name="AgentToken" Type="string" Value="[AGENT_TOKEN]" />
+          <!-- ⚠️ Ditulis OTOMATIS dari Product/@Version, tidak diketik manual.
+               Tujuannya satu: nomor versi harus bisa dicek langsung di PC.
+               Selama ini semua MSI tercatat "1.0.9.0" dan mustahil diketahui
+               mana yang benar-benar terpasang.
+                 reg query "HKLM\SOFTWARE\v3Netbill\Agent" /v AgentVersion
+               [ProductVersion] adalah properti bawaan MSI yang berisi
+               nilai Version di atas, jadi tidak bisa lupa/latest. -->
+          <RegistryValue Name="AgentVersion" Type="string" Value="[ProductVersion]" />
+          <!-- Dipasang sekali di build ini; dipakai diagnosa dan
+               uninstall-old-agent.bat agar tahu pernah ada build sebelumnya. -->
+          <RegistryValue Name="InstalledBuildUtc" Type="string" Value="[INSTALL_UTC]" />
         </RegistryKey>
         <CreateFolder />
       </Component>
