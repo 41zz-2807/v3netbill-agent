@@ -529,6 +529,21 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Penjaga kedua: pipe hidup bukan berarti server hidup. Pada 2 Okt 2026
+        // pipe tetap terhubung sepanjang 8 jam sementara socket ke server sudah
+        // mati, sehingga stop terkirim lalu hilang tanpa-balasan.
+        //
+        // Menolak di sini lebih baik daripada mengirim: server tetap menghitung
+        // sesi, dan pengguna tidak perlu menunggu perintah yang tidak akan
+        // sampai ke mana pun.
+        if (_stateProxy.ServerStatus != SessionStateProxy.ServerStatusConnected)
+        {
+            MiniStatusText.Text = "Belum terhubung ke server — coba lagi";
+            MiniStatusText.Visibility = Visibility.Visible;
+            AgentLog.Write("Stop sesi dicegah: belum terhubung ke server");
+            return;
+        }
+
         AgentLog.Write("Kirim StopSessionRequest ke service (satu klik, tanpa konfirmasi)");
         await _pipeClient.SendStopSessionRequestAsync();
     }

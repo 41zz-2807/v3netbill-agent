@@ -41,6 +41,8 @@ private readonly ILogger<SessionStateProxy> _logger;
             _serverStatus = value;
             OnPropertyChanged(nameof(ServerStatus));
             OnPropertyChanged(nameof(ServerStatusText));
+            OnPropertyChanged(nameof(ServerTerputus));
+            OnPropertyChanged(nameof(LabelWaktuText));
         }
     }
 
@@ -51,6 +53,20 @@ private readonly ILogger<SessionStateProxy> _logger;
         ServerStatusDisconnected => "Terputus dari server",
         _ => "Menghubungkan ke server...",
     };
+
+    /// <summary>
+    /// True kalau server sedang tidak terjangkau.
+    /// <para>
+    /// Dipakai kartu mini untuk memberi tahu hitung mundur tidak lagi
+    /// bergerak. Pada insiden 2 Okt 2026 angka di layar membeku diam-diam
+    /// selama 8 jam tanpa satu pun tanda bahwa tidak ada yang menghitung —
+    /// dalam aplikasi billing itu lebih buruk daripada tidak ditampilkan.
+    /// </para>
+    /// </summary>
+    public bool ServerTerputus => _serverStatus == ServerStatusDisconnected;
+
+    /// <summary>Label di bawah hitung mundur.</summary>
+    public string LabelWaktuText => ServerTerputus ? "SERVER TERPUTUS" : "SISA WAKTU";
 
     public bool Locked
     {
@@ -97,6 +113,7 @@ private readonly ILogger<SessionStateProxy> _logger;
             _sisaDetik = value;
             OnPropertyChanged(nameof(SisaDetik));
             OnPropertyChanged(nameof(CountdownText));
+            OnPropertyChanged(nameof(SisaWaktuMenipis));
             OnPropertyChanged(nameof(ProgressPercent));
             RaiseWaktuKategoriNotifikasi();
         }
@@ -128,6 +145,8 @@ private readonly ILogger<SessionStateProxy> _logger;
             _akunKode = value;
             OnPropertyChanged(nameof(AkunKode));
             OnPropertyChanged(nameof(AkunLabel));
+            OnPropertyChanged(nameof(AkunIdentitas));
+            OnPropertyChanged(nameof(AkunTipeLabel));
         }
     }
 
@@ -140,6 +159,8 @@ private readonly ILogger<SessionStateProxy> _logger;
             _akunNama = value;
             OnPropertyChanged(nameof(AkunNama));
             OnPropertyChanged(nameof(AkunLabel));
+            OnPropertyChanged(nameof(AkunIdentitas));
+            OnPropertyChanged(nameof(AkunTipeLabel));
         }
     }
 
@@ -152,6 +173,8 @@ private readonly ILogger<SessionStateProxy> _logger;
             _akunTipe = value;
             OnPropertyChanged(nameof(AkunTipe));
             OnPropertyChanged(nameof(AkunLabel));
+            OnPropertyChanged(nameof(AkunIdentitas));
+            OnPropertyChanged(nameof(AkunTipeLabel));
         }
     }
 
@@ -161,22 +184,52 @@ private readonly ILogger<SessionStateProxy> _logger;
         get
         {
             string tipe = AkunTipe == "MEMBER" ? "MEMBER" : "VOUCHER";
-            string identitas = !string.IsNullOrWhiteSpace(AkunNama)
-                ? AkunNama!
-                : !string.IsNullOrWhiteSpace(AkunKode)
-                    ? AkunKode!
-                    : "-";
-            return $"{tipe} / {identitas}";
+            return $"{tipe} / {AkunIdentitas}";
         }
     }
 
+    /// <summary>
+    /// Identitas akun saja (nama member atau kode voucher), tanpa didahului tipe.
+    /// Dipakai sebagai judul kartu mini yang meniru kartu PC di dashboard web.
+    /// </summary>
+    public string AkunIdentitas
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(AkunNama)) return AkunNama!;
+            if (!string.IsNullOrWhiteSpace(AkunKode)) return AkunKode!;
+            return "-";
+        }
+    }
+
+    /// <summary>Tipe akun siap tampil: "Voucher" atau "Member".</summary>
+    public string AkunTipeLabel => AkunTipe == "MEMBER" ? "Member" : "Voucher";
+
+    /// <summary>
+    /// Sisa waktu <= 5 menit — sama ambangnya dengan kartu PC di dashboard web,
+    /// supaya operator dan pelanggan melihat penanda yang sama.
+    /// </summary>
+    public bool SisaWaktuMenipis => SisaDetik <= 300;
+
+    /// <summary>
+    /// Hitung mundur siap tampil.
+    /// <para>
+    /// <b>Perbaikan penting.</b> Format lama <c>mm:ss</c> memakai komponen
+    /// menit-dalam-sejam, jadi sesi 1 jam lebih tampil sebagai "00:00" — dan
+    /// sesi 10 jam (member 30.000) selalu "00:00". Di aplikasi billing angka
+    /// yang salah lebih buruk daripada tidak ditampilkan sama sekali.
+    /// Sekarang mengikuti format dashboard web: ada jamnya kalau >= 1 jam.
+    /// </para>
+    /// </summary>
     public string CountdownText
     {
         get
         {
             if (SisaDetik <= 0) return "--:--";
             var ts = TimeSpan.FromSeconds(SisaDetik);
-            return ts.ToString(@"mm\:ss");
+            return ts.TotalHours >= 1
+                ? $"{(int)ts.TotalHours}j {ts:hh\\:mm}"
+                : ts.ToString(@"mm\\:ss");
         }
     }
 

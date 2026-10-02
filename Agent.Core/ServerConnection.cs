@@ -39,17 +39,64 @@ public sealed class ServerConnection : IAsyncDisposable
     /// </summary>
     private const int ACK_TIMEOUT_MILIDETIK = 10_000;
 
-    private readonly SocketIO _client;
+    /// <summary>
+    /// Berapa lama boleh tanpa bukti hidup apa pun sebelum socket dianggap
+    /// half-open. 60 detik = 4 heartbeat. Amber server 30 detik
+    /// (<c>HEARTBEAT_INTERVAL_DETIK</c> = 15), jadi kita-circle selama 2x.
+    /// </summary>
+    private const int STALE_TOTAL_DETIK = 60;
+
+    /// <summary>
+    /// Berapa heartbeat gagal beruntun sebelum socket dinyatakan mati.
+    /// Dua = 30 detik. Cukup lama untuk membiarkan satu hiccup lewat tanpa
+    /// reconnect yang tidak perlu, cukup cepat untuk tidak milik connect.
+    /// </summary>
+    private const int GAGAL_HEARTBEAT_UNTUK_MATI = 2;
+
+    /// <summary>
+    /// Tiap berapa tick sehat yang dicatat. 20 tick = 5 menit.
+    /// <para>
+    /// Dulu tiap tick (15 detik) dicatat, jadi 5.760 baris sehari — dan
+    /// 318 baris dari failed tick itulah yang memenuhi 686 KB agent.log pada
+    /// insiden 2 Okt. Kegagalan tetap dicatat SEMUA, karena itu yang dicari.
+    /// </para>
+    /// </summary>
+    private const int TICK_LOG_INTERVAL = 20;
+
+    private SocketIO? _client;
     private readonly ILogger _logger;
+    private readonly string _serverBaseUrl;
     private readonly string _pcId;
     private readonly string _agentToken;
     private readonly CancellationTokenSource _lifetimeCts = new();
     private Timer? _heartbeatTimer;
     private readonly object _heartbeatLock = new();
+    private readonly object _klienLock = new();
     private DateTime _lastWarnNotConnected = DateTime.MinValue;
     private int _heartbeatTickCount;
     private bool _registered;
     private bool _disposed;
+
+    /// <summary>Bukti terakhir socket ini benar-benar hidup (UTC).</summary>
+    private DateTime _aktivitasSuksesUtc = DateTime.MinValue;
+
+    /// <summary>Berapa heartbeat terakhir gagal beruntun.</summary>
+    private int _gagalHeartbeat;
+
+    /// <summary>
+    /// Socket dinyatakan mati oleh kita sendiri karena pengiriman heartbeat
+    /// gagal.
+    /// <para>
+    /// <b>Kenapa flag ini harus ada.</b> <c>SocketIO.Connected</c> hanya
+    /// berubah jadi false kalau library menerima close frame atau error
+    /// transport. Kalau middlebox (Cloudflare tunnel, NAT, firewall) drop flow
+    /// tanpa FIN/RST — yang happened pada 2 Okt 2026 jam 03:28 WIB — client
+    /// tidak akan pernah diberi tahu, dan flag itu tetap <c>true</c> selamanya.
+    /// Supervisor reconnect Meanwhile memeriksa flag itu, jadi tidak pernah
+    /// memanggil <c>ConnectAsync</c> lagi: PC offline 8 jam 7 menit.
+    /// </para>
+    /// </summary>
+    private volatile bool _socketMati;
 
     /// <summary>Event: server membalas <c>client:login_result</c>.</summary>
     public event EventHandler<ClientLoginResultEventArgs>? ClientLoginResultReceived;
@@ -78,18 +125,37 @@ public sealed class ServerConnection : IAsyncDisposable
     /// <summary>Server mendorong hash PIN bypass/maintenance baru.</summary>
     public event EventHandler<BypassConfigEventArgs>? BypassConfigReceived;
 
-    public bool IsConnected => _client.Connected;
-
-    /// <summary>Buat koneksi baru. Belum connect sampai <see cref="ConnectAsync"/> dipanggil.</summary>
-    public ServerConnection(string serverBaseUrl, string pcId, string agentToken, ILogger logger)
+    /// <summary>
+    /// Benar hanya kalau socket benar-benar bisa dipakai: hidup menurut library
+    /// <b>dan</b> belum dinyatakan mati oleh pemeriksaan heartbeat kita.
+    /// </summary>
+    public bool IsConnected
     {
-        _pcId = pcId;
-        _agentToken = agentToken;
-        _logger = logger;
+        get
+        {
+            var c = _client;
+            return c != null && c.Connected && !_socketMati && !SudahStale;
+        }
+    }
 
+    /// <summary>
+    /// True kalau socket sudah lama tidak memberi bukti hidup apa pun.
+    /// <para>
+    /// Ini jaring pengaman bagi heartbeat yang somehow tidak pernah melempar:
+    /// kalau semua pengiriman diam-diam hilang (kuota, middlebox yang
+    /// memorize), tidak ada exception yang bisa kita tangkap.
+    /// </para>
+    /// </summary>
+    private bool SudahStale =>
+        _aktivitasSuksesUtc != DateTime.MinValue &&
+        (DateTime.UtcNow - _aktivitasSuksesUtc).TotalSeconds > STALE_TOTAL_DETIK;
+
+    /// <summary>Buat instance Socket.IO baru dengan konfigurasi yang sama.</summary>
+    private SocketIO BuatClient()
+    {
         // SocketIOClient membaca namespace dari URL path → "http://host:3000/session"
-        var uri = new Uri($"{serverBaseUrl.TrimEnd('/')}{SESSION_NAMESPACE}");
-        _client = new SocketIO(uri, new SocketIOOptions
+        var uri = new Uri($"{_serverBaseUrl.TrimEnd('/')}{SESSION_NAMESPACE}");
+        return new SocketIO(uri, new SocketIOOptions
         {
             // polling dulu, upgrade otomatis ke WebSocket (sesuai Socket.IO v4 / EIO=4)
             EIO = EngineIO.V4,
@@ -106,50 +172,63 @@ public sealed class ServerConnection : IAsyncDisposable
             AutoUpgrade = true,
             Query = new System.Collections.Specialized.NameValueCollection
             {
-                { "pcId", pcId },
-                { "agentToken", agentToken },
+                { "pcId", _pcId },
+                { "agentToken", _agentToken },
             },
         });
-
-        HookEvents();
     }
 
-    private void HookEvents()
+    /// <summary>Buat koneksi baru. Belum connect sampai <see cref="ConnectAsync"/> dipanggil.</summary>
+    public ServerConnection(string serverBaseUrl, string pcId, string agentToken, ILogger logger)
     {
-        _client.OnConnected += OnConnected;
-        _client.OnDisconnected += OnDisconnected;
-        _client.OnError += (_, err) =>
+        _serverBaseUrl = serverBaseUrl;
+        _pcId = pcId;
+        _agentToken = agentToken;
+        _logger = logger;
+
+        lock (_klienLock)
+        {
+            _client = BuatClient();
+        }
+        HookEvents(_client);
+    }
+
+    private void HookEvents(SocketIO client)
+    {
+        client.OnConnected += OnConnected;
+        client.OnDisconnected += OnDisconnected;
+        client.OnError += (_, err) =>
             _logger.LogError("Socket.IO error: {Message}", err);
 
-        _client.On("client:login_result", ctx =>
+        client.On("client:login_result", ctx =>
         {
             var payload = ctx.GetValue<ClientLoginResultPayload>(0);
             ClientLoginResultReceived?.Invoke(this, new ClientLoginResultEventArgs(payload));
             return Task.CompletedTask;
         });
 
-        _client.On("session:start", ctx =>
+        client.On("session:start", ctx =>
         {
             var payload = ctx.GetValue<SessionStartPayload>(0);
             SessionStarted?.Invoke(this, new SessionStartEventArgs(payload));
             return Task.CompletedTask;
         });
 
-        _client.On("session:tick", ctx =>
+        client.On("session:tick", ctx =>
         {
             var payload = ctx.GetValue<SessionTickPayload>(0);
             SessionTicked?.Invoke(this, new SessionTickEventArgs(payload));
             return Task.CompletedTask;
         });
 
-        _client.On("session:stop", ctx =>
+        client.On("session:stop", ctx =>
         {
             var payload = ctx.GetValue<SessionStopPayload>(0);
             SessionStopped?.Invoke(this, new SessionStopEventArgs(payload));
             return Task.CompletedTask;
         });
 
-        _client.On("admin:lock", ctx =>
+        client.On("admin:lock", ctx =>
         {
             var payload = ctx.GetValue<AdminLockPayload>(0);
             AdminLockReceived?.Invoke(this, new AdminLockEventArgs(payload));
@@ -159,7 +238,7 @@ public sealed class ServerConnection : IAsyncDisposable
         // Konfigurasi OTP Telegram yang didorong server saat admin menyimpannya
         // di halaman Pengaturan. Agent menyimpannya ke disk agar tetap bisa
         // mengirim OTP ke Telegram walaupun server sedang mati.
-        _client.On("agent:otp_config", ctx =>
+        client.On("agent:otp_config", ctx =>
         {
             var payload = ctx.GetValue<OtpConfigPayload>(0);
             if (payload != null)
@@ -169,7 +248,7 @@ public sealed class ServerConnection : IAsyncDisposable
             return Task.CompletedTask;
         });
 
-        _client.On("agent:bypass_config", ctx =>
+        client.On("agent:bypass_config", ctx =>
         {
             var payload = ctx.GetValue<BypassConfigPayload>(0);
             if (payload != null)
@@ -179,7 +258,7 @@ public sealed class ServerConnection : IAsyncDisposable
             return Task.CompletedTask;
         });
 
-        _client.On("admin:shutdown", ctx =>
+        client.On("admin:shutdown", ctx =>
         {
             var payload = ctx.GetValue<AdminShutdownPayload>(0);
             AdminShutdownReceived?.Invoke(this, new AdminShutdownEventArgs(payload));
@@ -189,9 +268,32 @@ public sealed class ServerConnection : IAsyncDisposable
 
     private void OnConnected(object? sender, EventArgs e)
     {
+        _aktivitasSuksesUtc = DateTime.UtcNow;
+        _gagalHeartbeat = 0;
+        _socketMati = false;
         _logger.LogInformation("Terhubung ke server ({Namespace}) — registrasi agent...", SESSION_NAMESPACE);
         ServerLinkChanged?.Invoke(this, new ServerLinkEventArgs(true));
-        _ = RegisterAsync(_lifetimeCts.Token);
+        // Jangan `_ = RegisterAsync(...)` telanjang. RegisterAsync melempar
+        // kalau socket mati di tengah, dan task yang tidak di-await akan
+        // menjadi unobserved task exception.
+        _ = RegisterAsyncAman();
+    }
+
+    /// <summary>Jalankan <see cref="RegisterAsync"/> tanpa exception yang terlantar.</summary>
+    private async Task RegisterAsyncAman()
+    {
+        try
+        {
+            await RegisterAsync(_lifetimeCts.Token);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Gagal mengirim agent:register");
+            AgentLog.Write(ex, "Gagal kirim agent:register");
+            // Supervisor akan mencoba lagi: RegisterAsync sudah mengembalikan
+            // _registered ke false, jadi pemanggilan berikutnya tidak di-skip.
+        }
     }
 
     private void OnDisconnected(object? sender, string reason)
@@ -206,30 +308,152 @@ public sealed class ServerConnection : IAsyncDisposable
         ServerLinkChanged?.Invoke(this, new ServerLinkEventArgs(false, reason));
         StopHeartbeat();
         _registered = false; // izinkan register ulang saat reconnect berikutnya
+        _socketMati = true;  // instance ini sudah tidak bisa dipakai lagi
     }
 
     /// <summary>Connect + register + mulai heartbeat. Idempotent.</summary>
     public async Task ConnectAsync(CancellationToken ct = default)
     {
-        await _client.ConnectAsync();
+        // Socket yang dinyatakan mati TIDAK bisa dipakai ulang: state internal
+        // library masih menyimpan session half-open, dan ConnectAsync() pada
+        // instance itu bisa melempar atau — lebih buruk — membuat session kedua
+        // tanpa menutup yang pertama (server lalu saling menendang). Jadi buat
+        // instance baru dari nol.
+        if (_socketMati || SudahStale)
+        {
+            AgentLog.Write("Socket lama dinyatakan mati — buat instance Socket.IO baru");
+            await GantiClientAsync();
+        }
+
+        var client = _client;
+        if (client == null) throw new InvalidOperationException("Client Socket.IO belum dibuat.");
+
+        await client.ConnectAsync();
+        _aktivitasSuksesUtc = DateTime.UtcNow;
+        _gagalHeartbeat = 0;
+        _socketMati = false;
         await RegisterAsync(ct);
         StartHeartbeat();
+    }
+
+    /// <summary>
+    /// Buat instance <see cref="SocketIO"/> baru dan pasang ulang semua handler.
+    /// Instance lama dibuang lebih dulu supaya tidak ada dua session hidup.
+    /// </summary>
+    private async Task GantiClientAsync()
+    {
+        SocketIO? lama;
+        SocketIO baru;
+        lock (_klienLock)
+        {
+            lama = _client;
+            baru = BuatClient();
+            _client = baru;
+        }
+        HookEvents(baru);
+
+        if (lama == null) return;
+        try
+        {
+            // DisconnectAsync kadang melempar kalau transport-nya sudah mati —
+            // itu justru kondisi yang diharapkan di sini, jadi jangan biarkan
+            // exception-nya membatalkan pembuatan client baru.
+            if (lama.Connected) await lama.DisconnectAsync();
+        }
+        catch (Exception ex)
+        {
+            AgentLog.Write($"Disconnect client lama gagal (diabaikan): {ex.GetType().Name} - {ex.Message}");
+        }
+        finally
+        {
+            try { lama.Dispose(); } catch { }
+        }
     }
 
     /// <summary>Kirim <c>agent:register</c> ke server.</summary>
     public async Task RegisterAsync(CancellationToken ct = default)
     {
-        if (_registered) return; // hanya sekali per koneksi
-        await _client.EmitAsync("agent:register",
-            [ new { pcId = _pcId, agentToken = _agentToken } ], ct);
+        var client = _client;
+        // `_registered` di-set SEBELUM await, bukan sesudah. Kalau di-set
+        // sesudah, OnConnected dan ConnectAsync bisa sama-sama membaca
+        // false lalu mengirim register dua kali — persis yang terlihat di log
+        // server (2-3 "registered with socket" untuk satu koneksi).
+        if (_registered || client == null) return;
         _registered = true;
-        _logger.LogInformation("agent:register terkirim untuk PC {PcId}", _pcId);
+        try
+        {
+            await client.EmitAsync("agent:register",
+                [ new { pcId = _pcId, agentToken = _agentToken } ], ct);
+            _aktivitasSuksesUtc = DateTime.UtcNow;
+            _logger.LogInformation("agent:register terkirim untuk PC {PcId}", _pcId);
+        }
+        catch
+        {
+            _registered = false; // boleh coba ulang di pemanggilan berikutnya
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Nyatakan socket mati karena pengiriman heartbeat gagal.
+    /// </summary>
+    /// <remarks>
+    /// Ini action item yang hilang pada insiden 2 Okt 2026: heartbeat gagal
+    /// 318 kali berturut-turut, tapi <c>catch</c> hanya menulis ke log dan
+    /// tidak mengubah apa pun. Karena supervisor reconnect memeriksa
+    /// <see cref="IsConnected"/> — yang tetap true karena library tidak pernah
+    /// menerima close frame — tidak ada yang terjadi selamanya.
+    /// <para>
+    /// Sebaiknya ini juga memberi tahu overlay supaya kartu di PC menunjukkan
+    /// "server terputus" alih-alih menampilkan hitung mundur yang sudah mati.
+    /// </para>
+    /// </remarks>
+    private void TandaiSocketMati(string alasan)
+    {
+        bool baruMati = !_socketMati;
+        _socketMati = true;
+        StopHeartbeat();
+        _registered = false;
+        if (!baruMati) return;
+
+        _logger.LogError("Socket dinyatakan mati: {Alasan} — supervisor akan connect ulang", alasan);
+        AgentLog.Write($"SOCKET MATI: {alasan} — supervisor akan buat instance baru lalu connect ulang");
+        ServerLinkChanged?.Invoke(this, new ServerLinkEventArgs(false, "koneksi tidak ada dengan server"));
+
+        // Kumpulkan log + status lalu kirim ke server. Socket yang baru saja
+        // dinyatakan mati adalah bukti yang jelas ada masalah, dan itu momen
+        // terbaik untuk mengambil log: isinya masih mencakup urutan kejadian
+        // dari awal sampai reconnect berikutnya berhasil.
+        // Cooldown + batas harian ada di AgentDiagnostics, jadi ini tidak
+        // menjadi floods kalau socket sering mati.
+        _ = KirimDiagnosaTerjadwal();
+    }
+
+    /// <summary>
+    /// Jeda singkat lalu kirim diagnosa, supaya log ikut memuat
+    /// proses kesembuhannya (reconnect berhasil beberapa detik kemudian).
+    /// </summary>
+    private async Task KirimDiagnosaTerjadwal()
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(45), _lifetimeCts.Token).ConfigureAwait(false);
+            await AgentDiagnostics
+                .KumpulkanDanKirim(_serverBaseUrl, _pcId, _agentToken, _lifetimeCts.Token)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            AgentLog.Write(ex, "Diagnosa terjadwal gagal");
+        }
     }
 
     /// <summary>Kirim <c>agent:heartbeat</c> manual (dipakai bila mau dipicu selain timer).</summary>
     public async Task SendHeartbeatAsync(CancellationToken ct = default)
     {
-        if (!_client.Connected)
+        var client = _client;
+        if (client == null || !client.Connected)
         {
             // Jangan senyap: dulu baris ini return tanpa log apa pun sehingga heartbeat
             // bisa mati tanpa jejak sementara socket masih ada di sisi server.
@@ -239,11 +463,14 @@ public sealed class ServerConnection : IAsyncDisposable
                 _logger.LogWarning("Heartbeat dilewati: socket lokal dianggap tidak terhubung");
                 AgentLog.Write("Heartbeat dilewati: socket lokal dianggap tidak terhubung");
             }
+            _socketMati = true;
             return;
         }
         try
         {
-            await _client.EmitAsync("agent:heartbeat", [ new { pcId = _pcId } ], ct);
+            await client.EmitAsync("agent:heartbeat", [ new { pcId = _pcId } ], ct);
+            _aktivitasSuksesUtc = DateTime.UtcNow;
+            _gagalHeartbeat = 0;
             _logger.LogDebug("agent:heartbeat → PC {PcId}", _pcId);
         }
         catch (Exception ex)
@@ -252,18 +479,47 @@ public sealed class ServerConnection : IAsyncDisposable
             // dan hilang tanpa trace.
             _logger.LogError(ex, "Gagal mengirim agent:heartbeat untuk PC {PcId}", _pcId);
             AgentLog.Write(ex, "Gagal kirim agent:heartbeat");
+            _gagalHeartbeat++;
+// JANGAN hanya melog: itu yang membuat PC offline 8 jam. Setelah
+            // dua gagal beruntun (30 detik) socket dinyatakan mati supaya
+            // supervisor benar-benar connect ulang dengan instance baru.
+            if (_gagalHeartbeat >= GAGAL_HEARTBEAT_UNTUK_MATI)
+            {
+                TandaiSocketMati(
+                    $"{_gagalHeartbeat}x heartbeat gagal: {ex.GetType().Name} - {ex.Message}");
+            }
         }
     }
 
     /// <summary>Client (overlay) minta login voucher/member ke server.</summary>
     public async Task SendLoginRequestAsync(string kode, string password, CancellationToken ct = default)
     {
-        await _client.EmitAsync("client:login_request", [ new
+        var client = _client;
+        if (client == null || !client.Connected)
         {
-            pcId = _pcId,
-            kredensial = new { kode, password },
-        } ], ct);
-        _logger.LogInformation("client:login_request untuk kode {Kode}", kode);
+            AgentLog.Write("client:login_request ditolak — socket tidak terhubung");
+            throw new InvalidOperationException("Belum terhubung ke server.");
+        }
+        try
+        {
+            await client.EmitAsync("client:login_request", [ new
+            {
+                pcId = _pcId,
+                kredensial = new { kode, password },
+            } ], ct);
+            _aktivitasSuksesUtc = DateTime.UtcNow;
+            _logger.LogInformation("client:login_request untuk kode {Kode}", kode);
+        }
+        catch (Exception ex)
+        {
+            // Jangan biarkan exception lepas ke pemanggil. Jalur ini dipanggil
+            // dari NamedPipeServer yang tidak punya try/catch per-pesan, jadi
+            // satu EmitAsync yang gagal akan MEMBUAT PIPA MATI — bukan hanya
+            // gagal satu perintah.
+            _logger.LogError(ex, "Gagal mengirim client:login_request");
+            AgentLog.Write(ex, "Gagal kirim client:login_request");
+            throw new InvalidOperationException("Gagal mengirim permintaan login ke server.", ex);
+        }
     }
 
     /// <summary>
@@ -279,7 +535,7 @@ public sealed class ServerConnection : IAsyncDisposable
         string password,
         CancellationToken ct = default)
     {
-        if (!_client.Connected) return null;
+        if (_client == null || !_client.Connected) return null;
 
         // SocketIOClient 4.x tidak punya EmitWithAckAsync. Ack diambil lewat
         // overload EmitAsync yang menerima callback.
@@ -291,15 +547,26 @@ public sealed class ServerConnection : IAsyncDisposable
         var tcs = new TaskCompletionSource<CreatePasswordResultPayload?>(
             TaskCreationOptions.RunContinuationsAsynchronously);
 
-        await _client.EmitAsync(
-            AgentEvents.ClientCreatePassword,
-            new object[] { new { pcId = _pcId, kode, passwordLama, password } },
-            response =>
-            {
-                tcs.TrySetResult(BacaAck(response));
-                return Task.CompletedTask;
-            },
-            ct);
+        try
+        {
+            await _client.EmitAsync(
+                AgentEvents.ClientCreatePassword,
+                new object[] { new { pcId = _pcId, kode, passwordLama, password } },
+                response =>
+                {
+                    tcs.TrySetResult(BacaAck(response));
+                    return Task.CompletedTask;
+                },
+                ct);
+        }
+        catch (Exception ex)
+        {
+            // Tanpa try/catch, socket half-open membuat pipe mati (lihat
+            // SendStopSessionAsync). Pemanggil sudah menampilkan
+            // "Gagal mengganti password" dari nilai null.
+            AgentLog.Write(ex, "Gagal kirim client:create_password");
+            return null;
+        }
 
         // PENTING: overload CancelAfter(int) satuannya MILIDETIK. dalam
         // milidetik membuat balasan dibatalkan sebelum sempat datang, dan
@@ -351,9 +618,30 @@ public sealed class ServerConnection : IAsyncDisposable
     /// <summary>Client (overlay) minta berhenti dari sesi yang sedang berjalan.</summary>
     public async Task SendStopSessionAsync(CancellationToken ct = default)
     {
-        if (!_client.Connected) return;
-        await _client.EmitAsync("client:stop_session", [ new { pcId = _pcId } ], ct);
-        _logger.LogInformation("client:stop_session dikirim untuk PC {PcId}", _pcId);
+        var client = _client;
+        if (client == null || !client.Connected)
+        {
+            AgentLog.Write("client:stop_session ditolak — socket tidak terhubung");
+            throw new InvalidOperationException("Belum terhubung ke server.");
+        }
+        try
+        {
+            await client.EmitAsync("client:stop_session", [ new { pcId = _pcId } ], ct);
+            _aktivitasSuksesUtc = DateTime.UtcNow;
+            _logger.LogInformation("client:stop_session dikirim untuk PC {PcId}", _pcId);
+        }
+        catch (Exception ex)
+        {
+            // WAJIB. Tanpa try/catch, socket yang sudah half-open (Connected
+            // true tapi transport mati) membuat EmitAsync melempar, dan
+            // exception-nya naik sampai PipeListenerAsync yang lalu menutup
+            // pipe. Gejalanya persis "klik tombol STOP tidak berfungsi" —
+            // tercatat di agent.log: stop diterima 11:30:56.532, pipe putus
+            // 11:30:56.558.
+            _logger.LogError(ex, "Gagal mengirim client:stop_session untuk PC {PcId}", _pcId);
+            AgentLog.Write(ex, "Gagal kirim client:stop_session");
+            throw new InvalidOperationException("Gagal menghentikan sesi ke server.", ex);
+        }
     }
 
     private void StartHeartbeat()
@@ -380,11 +668,21 @@ public sealed class ServerConnection : IAsyncDisposable
         try
         {
             _heartbeatTickCount++;
-            // Log tiap tick: satu-satunya cara memastikan apakah timer benar-benar
-            // menembak. Tanpa ini, "tidak ada heartbeat di DB" tidak bisa
-            // dibedakan dari "timer mati" vs "guard Connected men-trip" vs
-            // "EmitAsync melempar".
-            AgentLog.Write($"Heartbeat tick #{_heartbeatTickCount} (connected={_client.Connected})");
+            // Bukti timer masih hidup dicatat tiap TICK_LOG_INTERVAL tick, bukan
+            // tiap tick — lihat catatan pada konstanta itu.
+            //
+            // `hidup=` memakai IsConnected (yang sudah bisa dipercaya), bukan
+            // SocketIO.Connected mentah. Pada insiden 2 Okt keduanya berbeda:
+            // library bilang true sementara kita sudah tahu socket itu mati.
+            //
+            // Selama heartbeat sedang gagal, tick dicatat setiap saat — justru
+            // ini yang dicari saat menelusuri insiden.
+            if (_gagalHeartbeat > 0 || _heartbeatTickCount % TICK_LOG_INTERVAL == 1)
+            {
+                AgentLog.WriteRutin(
+                    $"Heartbeat tick #{_heartbeatTickCount} (hidup={IsConnected}, " +
+                    $"gagalBerturut={_gagalHeartbeat})");
+            }
             SendHeartbeatAsync(_lifetimeCts.Token).GetAwaiter().GetResult();
         }
         catch (Exception ex)
@@ -418,12 +716,17 @@ public sealed class ServerConnection : IAsyncDisposable
         StopHeartbeat();
         _lifetimeCts.Cancel();
 
-        if (_client.Connected)
+        var client = _client;
+        _client = null;
+        if (client != null)
         {
-            await _client.DisconnectAsync();
+            try
+            {
+                if (client.Connected) await client.DisconnectAsync();
+            }
+            catch { /* socket sudah mati — tidak ada yang perlu dibersihkan */ }
+            try { client.Dispose(); } catch { }
         }
-
-        _client.Dispose();
         _lifetimeCts.Dispose();
     }
 }

@@ -463,12 +463,45 @@ public class Worker : BackgroundService
                 var msg = JsonConvert.DeserializeObject<PipeMessage>(json);
                 if (msg == null) continue;
 
-                await HandleOverlayMessageAsync(msg, ct);
+                // WAJIB try/catch sendiri. Tanpa ini, satu pesan yang gagal
+                // ditangani (mis. socket server sudah mati) membuat exception
+                // naik ke catch di bawah, yang mengakhiri loop DAN membuang
+                // pipe. Gejalanya: overlay kehilangan pipa setiap kali satu
+                // perintah gagal — tercatat di agent.log 11:30:56.532 stop
+                // diterima, 11:30:56.558 pipe putus.
+                try
+                {
+                    await HandleOverlayMessageAsync(msg, ct);
+                }
+                catch (OperationCanceledException) { break; }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Gagal menangani pesan overlay {Tipe}", msg.Type);
+                    AgentLog.Write(ex, $"Gagal menangani pesan overlay {msg.Type} - pipa tetap hidup");
+
+                    // JANGAN membalas SessionStopped di sini. Stop yang gagal
+                    // terkirim berarti server tetap menghitung sesi; mengunci
+                    // layar karena perintah lokal akan berbohong soal kondisi
+                    // PC. Indikator "Terputus dari server" sudah muncul dari
+                    // sisi lain (ServerLinkChanged saat socket dinyatakan mati),
+                    // dan overlay menolak mengirim perintah saat itu terjadi.
+                    if (msg.Type == PipeMessageType.LoginRequest)
+                    {
+                        await SendToOverlayAsync(new PipeMessage(
+                            PipeMessageType.LoginResult,
+                            JsonConvert.SerializeObject(new
+                            {
+                                sukses = false,
+                                alasan = "Belum terhubung ke server. Coba lagi sebentar.",
+                            })));
+                    }
+                }
             }
             catch (OperationCanceledException) { break; }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Pipe read error");
+                AgentLog.Write(ex, "Pipe read error");
                 break;
             }
         }
