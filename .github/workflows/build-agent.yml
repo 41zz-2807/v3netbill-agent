@@ -211,12 +211,20 @@ jobs:
           # MSI ini dibuild ulang berkali-kali tanpa menaikkan versi, jadi
           # semuanya tercatat "1.0.9.0" dan mustahil diketahui mana yang
           # benar-benar terpasang di PC. Step ini gagal kalau masih basi.
-          $viewV = $db.OpenView("SELECT Value FROM Property WHERE Property = 'Version'")
+          # ⚠️ Nama property-nya ProductVersion, BUKAN Version. Versi
+          # kali dicoba dengan 'Version' dan hasilnya kosong — check-nya jadi
+          # tidak pernah gagal sama sekali, persis jenis bug yang seharusnya
+          # diceknya. Karena itu versi KOSONG juga dianggap gagal.
+          $viewV = $db.OpenView("SELECT Value FROM Property WHERE Property = 'ProductVersion'")
           $viewV.Execute()
           $versi = ""
           if ($recV = $viewV.Fetch()) { $versi = "$($recV.StringData(1))" }
           $viewV.Close()
-          Write-Host "Version di MSI: '$versi'"
+          Write-Host "ProductVersion di MSI: '$versi'"
+          if ([string]::IsNullOrWhiteSpace($versi)) {
+            Write-Error "ProductVersion tidak terbaca dari MSI. Check ini tidak berguna bila kosong."
+            exit 1
+          }
           if ($versi -eq '1.0.9.0') {
             Write-Error "Product/@Version masih 1.0.9.0. Naikkan di Installer/Product.wxs."
             exit 1
