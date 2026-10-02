@@ -20,21 +20,48 @@
 
 
 
-        <!-- Timeline mini panel. Warnanya ikut sisa waktu: >60% hijau, 30-60% kuning,
-             <=30% merah. Ketiganya mutually exclusive, jadi tidak saling tumpang tindih. -->
-        <Style x:Key="TimelineStyle" TargetType="ProgressBar">
-            <Setter Property="Height" Value="4"/>
+        <!-- Gaya tombol aksi kartu mini — meniru kelas .pcc__act di dashboard web:
+             32x32, radius 8, tanpa border. Foreground tidak diatur di sini supaya
+             tiap tombol bisa memberi warna sendiri lewat atributnya.
+
+             ⚠️ Background="Transparent" saja TIDAK cukup untuk menghilangkan bentuk
+             tombol: template bawaan Aero2 punya trigger IsMouseOver di dalam
+             ControlTemplate-nya sendiri yang menggambar background terang. Karena
+             itu ControlTemplate dipasang (isi hanya Border + ContentPresenter).
+             Jarak -1px saat hover meniru translateY(-1px) di CSS; scale() tidak
+             dipakai karena ikon cuma 16px di dalam kotak 32px sehingga akan
+             meleset dari tengah. -->
+        <Style x:Key="AksiKartuStyle" TargetType="Button">
+            <Setter Property="Width" Value="32"/>
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Foreground" Value="#2FBF71"/>
-            <Style.Triggers>
-                <DataTrigger Binding="{Binding IsWaktuSedang}" Value="True">
-                    <Setter Property="Foreground" Value="#F0B429"/>
-                </DataTrigger>
-                <DataTrigger Binding="{Binding IsWaktuKritis}" Value="True">
-                    <Setter Property="Foreground" Value="#FF5252"/>
-                </DataTrigger>
-            </Style.Triggers>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bg" CornerRadius="8"
+                                Background="{TemplateBinding Background}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bg" Property="Opacity" Value="0.8"/>
+                                <Setter Property="RenderTransform">
+                                    <Setter.Value>
+                                        <TranslateTransform Y="-1"/>
+                                    </Setter.Value>
+                                </Setter>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="bg" Property="Opacity" Value="0.4"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
         <!-- Template field berbentuk pil. PART_ContentHost wajib dipakai agar
@@ -295,7 +322,11 @@
             <!-- Dialog ganti password (hidden by default). Tampil dari mini window
                  saat sesi berjalan, bukan dari layar login. -->
 
-        <!-- Mini countdown window (visible while session active, desktop usable) — gaya Uiverse (navy + gradient cyan) -->
+<!-- Mini countdown window (visible while session active, desktop usable).
+             Meniru kartu PC AKTIF di dashboard web (kelas .pcc): panel putih
+             radius 16, header pastel #E0F7FA memuat hitung mundur + tombol aksi
+             ikon, body putih memuat nama akun + Status/Tipe.
+             Warna & ukuran diambil apa adanya dari frontend/src/index.css. -->
         <Border x:Name="MiniPanel"
                 Background="#FFFFFFFF"
                 CornerRadius="16"
@@ -311,151 +342,130 @@
                  Batas 1px + warna kartu putih sudah cukup memisahkan panel dari
                  desktop, dan yang ini tidak bisa gagal merender jadi kotak. -->
             <StackPanel Width="300">
-                <!-- Header: strip gradien cyan gaya Uiverse -->
-                <Border Background="#FFE0F7FA" CornerRadius="16,16,0,0" Padding="16,12,8,12">
+                <!-- ===== Header: hitung mundur kiri, tombol aksi kanan ===== -->
+                <Border Background="#FFE0F7FA" CornerRadius="16,16,0,0"
+                        Padding="18,16,14,14" MinHeight="90">
                     <Grid>
-                        <TextBlock Text="V3 NETBILL — SESI AKTIF"
-                                   FontSize="11" FontWeight="Bold"
-                                   Foreground="#0F172A"
-                                   VerticalAlignment="Center"/>
-                        <Button x:Name="MinimizeMiniButton"
-                                Content="&#x2013;"
-                                Width="26" Height="26"
-                                FontSize="16" FontWeight="Bold"
-                                Background="#FFFFFFFF" Foreground="#64748B"
-                                BorderThickness="0" Cursor="Hand"
-                                HorizontalAlignment="Right"
-                                Click="MinimizeMiniButton_Click">
-                            <Button.Template>
-                                <ControlTemplate TargetType="Button">
-                                    <Border x:Name="mbd" Background="{TemplateBinding Background}" CornerRadius="6">
-                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                    </Border>
-                                    <ControlTemplate.Triggers>
-                                        <Trigger Property="IsMouseOver" Value="True">
-                                            <Setter TargetName="mbd" Property="Background" Value="#E2E8F0"/>
-                                        </Trigger>
-                                    </ControlTemplate.Triggers>
-                                </ControlTemplate>
-                            </Button.Template>
-                        </Button>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0">
+                            <TextBlock x:Name="SisaWaktuText"
+                                       Text="{Binding CountdownText}"
+                                       FontSize="32" FontWeight="Bold"
+                                       FontFamily="Consolas, Courier New, monospace"
+                                       TextTrimming="CharacterEllipsis">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="#0F172A"/>
+                                        <Style.Triggers>
+                                            <!-- Sama dengan kelas .pcc__time (modifier warn) di dashboard web: <= 5 menit -->
+                                            <DataTrigger Binding="{Binding SisaWaktuMenipis}" Value="True">
+                                                <Setter Property="Foreground" Value="#DC2626"/>
+                                            </DataTrigger>
+                                            <!-- Diletakkan SETELAH penanda sisa waktu
+                                                 supaya saat server tak terjangkau
+                                                 angkanya jadi redup — bukan merah
+                                                 "waktu mau habis", karena saat itu
+                                                 angka itu memang tidak bergerak. -->
+                                            <DataTrigger Binding="{Binding ServerTerputus}" Value="True">
+                                                <Setter Property="Foreground" Value="#94A3B8"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <TextBlock Text="{Binding LabelWaktuText}"
+                                       FontSize="11" FontWeight="SemiBold"
+                                       Margin="0,2,0,0">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="#64748B"/>
+                                        <Style.Triggers>
+                                            <!-- Server tak terjangkau: angka di atas
+                                                 tidak lagi bergerak, dan itu wajib
+                                                 terlihat. -->
+                                            <DataTrigger Binding="{Binding ServerTerputus}" Value="True">
+                                                <Setter Property="Foreground" Value="#DC2626"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
+                            <!-- Minimalkan. Tombol ini tidak ada di kartu web, tapi
+                                 agent butuh: inilah cara pengguna PC tetap bisa
+                                 memakai desktop tanpa menutup panel. -->
+                            <Button x:Name="MinimizeMiniButton"
+                                    Style="{StaticResource AksiKartuStyle}"
+                                    Background="#FFF1F5F9" Foreground="#64748B"
+                                    ToolTip="Sembunyikan panel ini"
+                                    Click="MinimizeMiniButton_Click">
+                                <Path Width="16" Height="16" Stretch="Uniform"
+                                      Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}"
+                                      Data="M3,7.5 L10,7.5 L10,9 L3,9 Z"/>
+                            </Button>
+
+                            <!-- Ganti password: hanya tampil saat sesi berjalan,
+                                 jadi yang menekan memang pemilik akun itu sendiri. -->
+                            <Button x:Name="MiniGantiPasswordButton"
+                                    Style="{StaticResource AksiKartuStyle}"
+                                    Background="#FFCCFBF1" Foreground="#FF00B894"
+                                    ToolTip="Ganti password akun ini"
+                                    Click="BuatPasswordButton_Click">
+                                <!-- Path "vpn_key" Material Design, diskalakan ke 16px -->
+                                <Path Width="16" Height="16" Stretch="Uniform"
+                                      Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}"
+                                      Data="M12.65,10 A5.99,5.99 0 0,0 7,6 H5 V4 H3 V2 H7 V4 H9 V6 H11.65 A6,6 0 0,0 11.65,16 Z M7,14 A2,2 0 1,1 9,12 A2,2 0 0,1 7,14 Z"/>
+                            </Button>
+
+                            <!-- Stop sesi. Warna merah memakai nilai kelas .pcc__act (modifier power). -->
+                            <Button x:Name="StopSesiButton"
+                                    Style="{StaticResource AksiKartuStyle}"
+                                    Background="#FFFEE2E2" Foreground="#FFDC2626"
+                                    ToolTip="Akhiri sesi sekarang"
+                                    Click="StopSesiButton_Click">
+                                <Path Width="16" Height="16" Stretch="Uniform"
+                                      Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}"
+                                      Data="M4,4 L12,4 L12,12 L4,12 Z"/>
+                            </Button>
+                        </StackPanel>
                     </Grid>
                 </Border>
 
-                <Border Background="#FFFFFFFF" CornerRadius="0,0,16,16" Padding="16,14,16,14">
+                <!-- ===== Body: nama akun + Status/Tipe ===== -->
+                <Border Background="#FFFFFFFF" CornerRadius="0,0,16,16" Padding="18,14,18,14">
                     <StackPanel>
-                        <!-- Baris utama: lingkaran tombol stop (gaya album-cover) + identitas -->
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-
-                            <!-- Lingkaran = tombol stop sesi -->
-                            <Button x:Name="StopSesiButton"
-                                    Grid.Column="0"
-                                    Width="72" Height="72"
-                                    Background="#FF5252"
-                                    Cursor="Hand"
-                                    VerticalAlignment="Center"
-                                    ToolTip="Hentikan sesi sekarang"
-                                    Click="StopSesiButton_Click">
-                                <Button.Template>
-                                    <ControlTemplate TargetType="Button">
-                                        <Border x:Name="sbd"
-                                                Background="{TemplateBinding Background}"
-                                                CornerRadius="36">
-                                            <StackPanel VerticalAlignment="Center">
-                                                <Path Data="M6,6h12v12h-12z"
-                                                      Fill="White" Stretch="Uniform"
-                                                      Width="20" Height="20"
-                                                      HorizontalAlignment="Center"/>
-                                                <TextBlock Text="STOP"
-                                                           FontSize="10" FontWeight="Bold"
-                                                           Foreground="White"
-                                                           HorizontalAlignment="Center"
-                                                           Margin="0,2,0,0"/>
-                                            </StackPanel>
-                                        </Border>
-                                        <ControlTemplate.Triggers>
-                                            <Trigger Property="IsMouseOver" Value="True">
-                                                <Setter TargetName="sbd" Property="Background" Value="#FF6B6B"/>
-                                            </Trigger>
-                                            <Trigger Property="IsPressed" Value="True">
-                                                <Setter TargetName="sbd" Property="Background" Value="#D63232"/>
-                                            </Trigger>
-                                        </ControlTemplate.Triggers>
-                                    </ControlTemplate>
-                                </Button.Template>
-                            </Button>
-
-                            <!-- Judul (gaya song-title) + subjudul (gaya artist) -->
-                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="14,0,0,0">
-                                <TextBlock Text="AKUN"
-                                           FontSize="10" FontWeight="SemiBold"
-                                           Foreground="#64748B"/>
-                                <TextBlock Text="{Binding AkunLabel}"
-                                           FontSize="16" FontWeight="Bold"
-                                           Foreground="#0F172A"
-                                           TextTrimming="CharacterEllipsis"
-                                           Margin="0,2,0,0"/>
-                            </StackPanel>
-                        </Grid>
-
-                        <!-- Sisa waktu — tetap besar agar terbaca dari jauh.
-                             Berpindah ke bawah karena lingkaran dipakai tombol stop. -->
-                        <TextBlock Text="{Binding CountdownText}"
-                                   FontSize="46" FontWeight="Bold"
+                        <TextBlock Text="{Binding AkunIdentitas}"
+                                   FontSize="15" FontWeight="SemiBold"
                                    Foreground="#0F172A"
-                                   FontFamily="Consolas, Courier New, monospace"
-                                   HorizontalAlignment="Center"
-                                   Margin="0,6,0,0"/>
+                                   Margin="0,0,0,12"
+                                   TextTrimming="CharacterEllipsis"/>
 
-                        <!-- Timeline 4px, warna ikut sisa waktu. Nilai tetap dari
-                             ProgressPercent server, bukan animasi dekoratif. -->
-                        <Border Height="4" CornerRadius="2" Background="#E2E8F0"
-                                Margin="2,8,2,0" ClipToBounds="True">
-                            <ProgressBar x:Name="MiniProgressBar"
-                                         Style="{StaticResource TimelineStyle}"
-                                         Value="{Binding ProgressPercent, Mode=OneWay}"/>
-                        </Border>
+                        <StackPanel Orientation="Horizontal">
+                            <StackPanel Margin="0,0,24,0">
+                                <TextBlock Text="STATUS" FontSize="11" Foreground="#94A3B8"/>
+                                <TextBlock Text="BERJALAN"
+                                           FontSize="14" FontWeight="SemiBold"
+                                           Foreground="#FF16A34A"/>
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock Text="TIPE" FontSize="11" Foreground="#94A3B8"/>
+                                <TextBlock Text="{Binding AkunTipeLabel}"
+                                           FontSize="14" FontWeight="SemiBold"
+                                           Foreground="#FF334155"/>
+                            </StackPanel>
+                        </StackPanel>
 
-                        <!-- Ganti password: hanya muncul saat sesi berjalan, jadi
-                             yang menekan memang sedang memakai komputer ini. -->
-                        <Button x:Name="MiniGantiPasswordButton"
-                                Content="GANTI PASSWORD"
-                                FontSize="11"
-                                FontWeight="SemiBold"
-                                Background="Transparent"
-                                BorderThickness="0"
-                                Padding="0"
-                                Cursor="Hand"
-                                HorizontalAlignment="Center"
-                                Margin="0,10,0,0"
-                                Click="BuatPasswordButton_Click">
-                            <Button.Style>
-                                <Style TargetType="Button">
-                                    <Setter Property="Foreground" Value="#64748B"/>
-                                    <Style.Triggers>
-                                        <Trigger Property="IsMouseOver" Value="True">
-                                            <Setter Property="Foreground" Value="#00B894"/>
-                                        </Trigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </Button.Style>
-                            <Button.Template>
-                                <ControlTemplate TargetType="Button">
-                                    <ContentPresenter HorizontalAlignment="Center"
-                                                      VerticalAlignment="Center"/>
-                                </ControlTemplate>
-                            </Button.Template>
-                        </Button>
-
-                        <!-- Status / pesan error -->
+                        <!-- Status / pesan error. Default tersembunyi; kode di belakang menampilkannya
+                             hanya sebentar saat ada yang perlu diberitahukan. -->
                         <TextBlock x:Name="MiniStatusText"
-                                   FontSize="12" Foreground="#CA8A04"
-                                   HorizontalAlignment="Center"
-                                   Margin="2,8,2,0"
+                                   FontSize="12" Foreground="#FFCA8A04"
+                                   Margin="2,10,2,0"
                                    TextWrapping="Wrap"
                                    Visibility="Collapsed"/>
                     </StackPanel>
