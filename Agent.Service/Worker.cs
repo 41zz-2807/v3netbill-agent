@@ -680,14 +680,47 @@ public class Worker : BackgroundService
 
         try
         {
+            uint sesiInteraktif = InteractiveProcess.GetActiveConsoleSessionId();
             var processes = Process.GetProcessesByName("Agent.Overlay");
-            if (processes.Length == 0)
+
+            // ⚠️ "Proses ada" BUKAN berarti overlay terlihat.
+            // Build sebelumnya membuat window di desktop service (lpDesktop
+            // kosong), jadi Agent.Overlay.exe hidup di session 0 sementara user
+            // menatap desktop session 1. Watchdog lama melihat proses itu dan
+            // mengira segalanya baik — sehingga overlay tak terlihat bisa
+            // bertahan selamanya tanpa pernah dilepas.
+            //
+            // Proses di luar sesi interaktif itu harus dibunuh, lalu biarkan
+            // RestartOverlay() yang membuat yang benar.
+            foreach (var p in processes)
+            {
+                try
+                {
+                    if (sesiInteraktif != uint.MaxValue && p.SessionId != sesiInteraktif)
+                    {
+                        _logger.LogWarning(
+                            "Agent.Overlay berjalan di session {Aktual}, bukan sesi interaktif {Harapan} — dibunuh",
+                            p.SessionId, sesiInteraktif);
+                        AgentLog.Write(
+                            $"Watchdog: Agent.Overlay di session {p.SessionId} (harapan {sesiInteraktif}) — bunuh, lalu luncurkan ulang");
+                        p.Kill();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AgentLog.Write(ex, "Watchdog: gagal memeriksa session Agent.Overlay");
+                }
+            }
+
+            foreach (var p in processes) p.Dispose();
+
+            bool masihAda = Process.GetProcessesByName("Agent.Overlay").Length > 0;
+            if (!masihAda)
             {
                 _logger.LogWarning("Agent.Overlay not running during locked session — restarting...");
                 AgentLog.Write("Watchdog: Agent.Overlay tidak jalan dalam keadaan Locked — coba luncurkan");
                 RestartOverlay();
             }
-            foreach (var p in processes) p.Dispose();
         }
         catch (Exception ex)
         {

@@ -13,6 +13,9 @@ namespace V3Netbill.Agent.Service;
 /// </summary>
 internal static class InteractiveProcess
 {
+    /// <summary>ID sesi konsol yang sedang aktif, atau 0xFFFFFFFF kalau tidak ada.</summary>
+    public static uint GetActiveConsoleSessionId() => WTSGetActiveConsoleSessionId();
+
     public static bool Launch(string exePath, string workingDir)
     {
         uint sessionId = WTSGetActiveConsoleSessionId();
@@ -39,9 +42,39 @@ internal static class InteractiveProcess
             return false;
         }
 
+        IntPtr envBlock = IntPtr.Zero;
         try
         {
-            var si = new STARTUPINFO { cb = Marshal.SizeOf<STARTUPINFO>() };
+            var si = new STARTUPINFO
+            {
+                cb = Marshal.SizeOf<STARTUPINFO>(),
+
+                // ⚠️ INI yang membuat overlay tidak pernah terlihat.
+                // lpDesktop yang NULL berarti proses mewarisi desktop PEMANGGUL,
+                // yaitu desktop service di session 0. Window-nya jadi hidup di
+                // desktop yang tidak pernah dilihat user.
+                //
+                // Gejalanya persis seperti laporan kasir: CreateProcessAsUser
+                // sukses, proses Agent.Overlay.exe ADA di tasklist, tapi layar
+                // tetap bersih. Dan karena prosesnya ada, watchdog justru mengira
+                // overlay sehat sehingga tidak pernah meluncur ulang.
+                lpDesktop = @"winsta0\default",
+            };
+
+            // Environment milik user yang login, bukan milik SYSTEM.
+            // Tanpa ini anak mewarisi environment SYSTEM (USERPROFILE/APPDATA
+            // menunjuk ke folder service), dan beberapa pemanggilan folder
+            // milik WPF/.NET ikut salah.
+            if (CreateEnvironmentBlock(out envBlock, userToken, false))
+            {
+                AgentLog.Write("Launch overlay: environment block user dibuat");
+            }
+            else
+            {
+                AgentLog.Write($"Launch overlay: CreateEnvironmentBlock gagal err=0x{Marshal.GetLastWin32Error():X8} — lanjut tanpa env");
+                envBlock = IntPtr.Zero;
+            }
+
             var pi = new PROCESS_INFORMATION();
             string commandLine = "\"" + exePath + "\"";
             bool ok = CreateProcessAsUser(
@@ -52,7 +85,7 @@ internal static class InteractiveProcess
                 IntPtr.Zero,
                 false,
                 CREATE_UNICODE_ENVIRONMENT | CREATE_NEW_CONSOLE,
-                IntPtr.Zero,
+                envBlock,
                 workingDir,
                 ref si,
                 out pi);
@@ -71,6 +104,7 @@ internal static class InteractiveProcess
         }
         finally
         {
+            if (envBlock != IntPtr.Zero) DestroyEnvironmentBlock(envBlock);
             CloseHandle(primaryToken);
             CloseHandle(userToken);
         }
@@ -120,6 +154,14 @@ internal static class InteractiveProcess
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CloseHandle(IntPtr hObject);
+
+    [DllImport("userenv.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateEnvironmentBlock(out IntPtr lpEnvironment, IntPtr hToken, bool bInherit);
+
+    [DllImport("userenv.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DestroyEnvironmentBlock(IntPtr lpEnvironment);
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct STARTUPINFO
