@@ -52,8 +52,28 @@ public partial class UninstallGuardWindow : Window
     {
         if (_done) return;
         _done = true;
+        // Uninstall yang PIN-nya diterima ditandai di sini. Tanpa penanda ini,
+        // watchdog akan mengirim peringatan "agent di-uninstall" ke Telegram
+        // padahal yang uninstall adalah admin sendiri lewat PIN.
+        if (exitCode == 0) TandaiUninstallSah();
         try { _http.Dispose(); } catch { /* abaikan */ }
         Environment.Exit(exitCode);
+    }
+
+    /// <summary>
+    /// Tulis penanda "uninstall ini sah". Path-nya dari FlagPaths supaya sama
+    /// persis dengan yang dibaca watchdog.cmd.
+    /// <para>
+    /// Penanda sengaja TIDAK dihapus di sini: watchdog membacanya sekali dalam
+    /// satu menit ke depan, dan menghapusnya dari proses MSI yang sedang
+    /// berhenti bisa setengah jadi. Berkas kecil di Documents tidak mengganggu.
+    /// </para>
+    /// </summary>
+    private static void TandaiUninstallSah()
+    {
+        FlagPaths.Tulis(
+            FlagPaths.UninstallSahFlag,
+            $"PIN diterima pada {DateTime.Now:yyyy-MM-dd HH:mm:ss}{Environment.NewLine}");
     }
 
     private async Task RunVerifyAsync()

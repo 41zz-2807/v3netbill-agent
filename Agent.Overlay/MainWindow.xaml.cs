@@ -41,7 +41,6 @@ public partial class MainWindow : Window
     // True kalau wallpaper benar-benar berhasil dimuat. Veil putih hanya
     // ditampilkan kalau ada gambar di bawahnya — kalau tidak, latarnya sudah
     // berupa gradien terang dan veil tidak ada gunanya.
-    private bool _wallpaperDimuat;
     private bool _emergencyExit;
     private DispatcherTimer? _countdownTimer;
     private BuatPasswordDialogWindow? _dialogGantiPassword;
@@ -52,7 +51,7 @@ public partial class MainWindow : Window
     // tidak berlaku lagi.
     private const string EmergencyPin = "123456";
     private static readonly string StopFlagPath =
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments), "v3netbill-agent-stop.flag");
+        FlagPaths.StopFlag;
 
     public MainWindow(ILogger<MainWindow> logger, PipeClient pipeClient, KeyboardHook keyboardHook, SessionStateProxy stateProxy, IConfiguration config)
     {
@@ -149,9 +148,6 @@ public partial class MainWindow : Window
             Dispatcher.Invoke(() =>
             {
                 OverlayBackground.Background = new ImageBrush(bitmap) { Stretch = Stretch.UniformToFill };
-                _wallpaperDimuat = true;
-                // Veil langsung ikut status shown/collapsed-nya overlay.
-                SinkronkanVeil();
             });
             AgentLog.Write($"Wallpaper diterapkan ({bytes.Length} bytes)");
             _logger.LogInformation("Wallpaper diterapkan ({N} bytes)", bytes.Length);
@@ -160,19 +156,6 @@ public partial class MainWindow : Window
         {
             _logger.LogWarning(ex, "Gagal memuat wallpaper");
         }
-    }
-
-    /// <summary>
-    /// Veil ikut mengikuti apakah overlay sedang tampil. Kalau disembunyikan
-    /// tanpa wallpaper pun tetap aman: saat di-lock dia ikut Visible,
-    /// jadi tidak pernah ada wallpaper yang tergambar tanpa veil.
-    /// </summary>
-    private void SinkronkanVeil()
-    {
-        bool tampil = OverlayBackground.Visibility == Visibility.Visible;
-        WallpaperVeil.Visibility = (tampil && _wallpaperDimuat)
-            ? Visibility.Visible
-            : Visibility.Collapsed;
     }
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
@@ -240,7 +223,6 @@ public partial class MainWindow : Window
         // memanggilnya hanya di cabang `locked`, jadi begitu pengguna login
         // dan OverlayBackground di-Collapsed, veil putih 62% TETAP menggantung
         // di atas seluruh desktop — layar jadi terlihatwashed out.
-        SinkronkanVeil();
     }
 
     private void UpdateWindowState()

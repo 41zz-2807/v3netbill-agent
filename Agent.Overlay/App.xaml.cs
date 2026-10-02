@@ -36,9 +36,10 @@ public partial class App : Application
         }
 
         // Mode maintenance: flag stop ada → jangan jalankan overlay.
-        string stopFlag = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments),
-            "v3netbill-agent-stop.flag");
+        // Path-nya dari FlagPaths supaya sama persis dengan yang dibaca service
+        // dan watchdog.cmd. SpecialFolder.CommonDocuments BERBEDA antara
+        // user interaktif dan LocalSystem.
+        string stopFlag = FlagPaths.StopFlag;
         if (File.Exists(stopFlag))
         {
             AgentLog.Write($"Stop flag '{stopFlag}' ada — overlay keluar (mode maintenance)");

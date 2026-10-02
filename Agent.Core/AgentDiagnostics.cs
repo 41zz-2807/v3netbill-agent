@@ -113,8 +113,22 @@ public static class AgentDiagnostics
         return true;
     }
 
+    /// <summary>
+    /// Titik suntik untuk pengujian: kalau diisi, langkah ini yang dipakai
+    /// sebagai ganti menjalankan kumpul-log.bat.
+    /// </summary>
+    /// <remarks>
+    /// Di produksi tidak pernah diisi. Yang membuatnya ada adalah kenyataan
+    /// bahwa bagian yang paling rawan salah (batas ukuran zip, cooldown,
+    /// dan kontrak HTTP ke server) tidak bisa diperiksa dari Linux, karena
+    /// kumpul-log.bat hanya jalan di Windows.
+    /// </remarks>
+    public static Func<CancellationToken, Task<bool>>? PengumpulUji { get; set; }
+
     private static async Task<bool> JalankanBatAsync(CancellationToken ct)
     {
+        if (PengumpulUji != null) return await PengumpulUji(ct);
+
         string bat = Path.Combine(AppContext.BaseDirectory, "kumpul-log.bat");
         if (!File.Exists(bat))
         {

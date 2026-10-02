@@ -214,11 +214,18 @@ private readonly ILogger<SessionStateProxy> _logger;
     /// <summary>
     /// Hitung mundur siap tampil.
     /// <para>
-    /// <b>Perbaikan penting.</b> Format lama <c>mm:ss</c> memakai komponen
-    /// menit-dalam-sejam, jadi sesi 1 jam lebih tampil sebagai "00:00" — dan
-    /// sesi 10 jam (member 30.000) selalu "00:00". Di aplikasi billing angka
-    /// yang salah lebih buruk daripada tidak ditampilkan sama sekali.
-    /// Sekarang mengikuti format dashboard web: ada jamnya kalau >= 1 jam.
+    /// <b>Format verbatim hanya boleh satu backslash.</b> Di dalam
+    /// <c>@"..."</c> tidak ada escaping, jadi <c>@"mm\\:ss"</c> berarti dua
+    /// backslash dan <c>TimeSpan.ToString</c> melempar
+    /// <c>FormatException</c>. Binding WPF yang melempar tidak menampilkan
+    /// apa pun — jadi hitung mundur hilang total untuk setiap sesi di bawah
+    /// satu jam. Gejalanya dilaporkan 2 Okt 2026: label "SISA WAKTU" ada
+    /// tapi angkanya kosong.
+    /// </para>
+    /// <para>
+    /// Karena itu dibungkus try/catch dan selalu punya nilai cadangan.
+    /// Angka ini adalah informasi paling penting di layar itu; ia tidak
+    /// boleh kosong dalam keadaan apa pun.
     /// </para>
     /// </summary>
     public string CountdownText
@@ -226,10 +233,27 @@ private readonly ILogger<SessionStateProxy> _logger;
         get
         {
             if (SisaDetik <= 0) return "--:--";
-            var ts = TimeSpan.FromSeconds(SisaDetik);
-            return ts.TotalHours >= 1
-                ? $"{(int)ts.TotalHours}j {ts:hh\\:mm}"
-                : ts.ToString(@"mm\\:ss");
+            try
+            {
+                var ts = TimeSpan.FromSeconds(SisaDetik);
+                // Sesi >= 1 jam memakai format dashboard web "Xj MM:SS".
+                //
+                // ⚠️ JANGAN pakai `hh` di sini. `hh` adalah komponen jam
+                // DALAM SEHARI, jadi 3600 detik jadi "1j 01:00" — jamnya
+                // dobel dengan angka jam total yang sudah ditulis di depan.
+                // Yang dipakai hanya `mm` (menit-dalam-saat) dan `ss`, karena
+                // jam total sudah dicetak sendiri.
+                return ts.TotalHours >= 1
+                    ? $"{(int)ts.TotalHours}j {ts:mm\\:ss}"
+                    : ts.ToString(@"mm\:ss");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Format hitung mundur gagal untuk {Detik} detik", SisaDetik);
+                // Cadangan terakhir: detik mentah. Salah bentuk lebih baik
+                // daripada tidak tampil sama sekali.
+                return $"{SisaDetik}s";
+            }
         }
     }
 

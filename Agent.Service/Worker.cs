@@ -670,10 +670,9 @@ public class Worker : BackgroundService
         if (_currentState.State != SessionState.LockState.Locked) return;
 
         // Mode maintenance (emergency stop dari overlay): jangan luncurkan ulang.
-        string stopFlag = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments),
-            "v3netbill-agent-stop.flag");
-        if (File.Exists(stopFlag))
+        // ⚠️ Path-nya harus sama persis dengan yang dipakai overlay, kalau tidak
+        // flag ini tidak akan pernah terlihat di sini. Lihat FlagPaths.
+        if (File.Exists(FlagPaths.StopFlag))
         {
             _logger.LogInformation("Stop flag ada — overlay tidak diluncurkan ulang (mode maintenance)");
             return;
@@ -765,20 +764,81 @@ public class Worker : BackgroundService
         }
     }
 
+    /// <summary>
+    /// Blokir / buka Task Manager untuk SEMUA profil yang sedang login.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ <b>Registry.CurrentUser TIDAK bisa dipakai di sini.</b> Service ini
+    /// jalan sebagai LocalSystem, jadi CurrentUser menunjuk
+    /// <c>HKEY_USERS\S-1-5-18</c> — nilai DisableTaskMgr hanya berlaku untuk
+    /// akun SYSTEM dan tidak pernah sampai ke akun pelanggan yang sedang login.
+    /// Fitur ini sudah ada sejak awal tetapi tidak pernah benar-benar memblokir
+    /// Task Manager; sekarang ditulis ke tiap profil yang ada di HKEY_USERS.
+    /// <para>
+    /// Nilai registry tidak langsung dibaca Task Manager yang sedang buka,
+    /// jadi WM_SETTINGCHANGE disiarkan supaya tidak baru berlaku setelah
+    /// Task Manager ditutup atau PC dinyalakan ulang.
+    /// </para>
+    /// </remarks>
     private void SetTaskManagerBlocked(bool block)
     {
+        const string keyPath = @"Software\Microsoft\Windows\CurrentVersion\Policies\System";
+        const string valueName = "DisableTaskMgr";
+        int tersentuh = 0;
+
         try
         {
-            const string keyPath = @"Software\Microsoft\Windows\CurrentVersion\Policies\System";
-            const string valueName = "DisableTaskMgr";
-            using var key = Registry.CurrentUser.CreateSubKey(keyPath, true);
-            key.SetValue(valueName, block ? 1 : 0, RegistryValueKind.DWord);
-            _logger.LogInformation("Task Manager {Action}", block ? "blocked" : "unblocked");
+            using (var hives = Registry.Users)
+            {
+                foreach (string sid in hives.GetSubKeyNames())
+                {
+                    // _Classes dan apa pun yang diawali titik adalah class
+                    // store / hive default, bukan profil orang.
+                    if (sid.Equals("_Classes", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (sid.StartsWith(".", StringComparison.Ordinal)) continue;
+
+                    try
+                    {
+                        using var profil = hives.OpenSubKey(sid);
+                        if (profil == null) continue;
+                        using var key = profil.CreateSubKey(keyPath, true);
+                        if (key == null) continue;
+                        key.SetValue(valueName, block ? 1 : 0, RegistryValueKind.DWord);
+                        tersentuh++;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Gagal menulis DisableTaskMgr untuk profil {Sid}", sid);
+                    }
+                }
+            }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to {Action} Task Manager", block ? "block" : "unblock");
+            _logger.LogError(ex, "Gagal {_Action} Task Manager", block ? "memblokir" : "membuka");
+            return;
         }
+
+        try { BroadcastPolicyChange(); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Gagal menyiarkan WM_SETTINGCHANGE"); }
+
+        _logger.LogInformation(
+            "Task Manager {Action} untuk {Jumlah} profil", block ? "diblokir" : "dibuka", tersentuh);
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern IntPtr SendMessageTimeout(
+        IntPtr hWnd, uint msg, UIntPtr wParam, string lParam,
+        uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);
+
+    /// <summary>Siarkan WM_SETTINGCHANGE ke semua jendela agar kebijakan langsung berlaku.</summary>
+    private static void BroadcastPolicyChange()
+    {
+        const uint WM_SETTINGCHANGE = 0x001A;
+        const uint SMTO_ABORTIFHUNG = 0x0002;
+        SendMessageTimeout(
+            (IntPtr)0xffff, WM_SETTINGCHANGE, UIntPtr.Zero, "Policy",
+            SMTO_ABORTIFHUNG, 3000, out _);
     }
 
     /// <summary>
