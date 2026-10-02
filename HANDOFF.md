@@ -117,15 +117,27 @@ Registry: `HKLM\Software\v3Netbill\Agent` (dan `WOW6432Node` untuk installer 32-
   `Agent.Overlay.exe --uninstall-guard` **sebelum** `RemoveFiles`.
 - Guard memverifikasi PIN admin lewat `/api/settings/verify-pin` (butuh `pcId` + `agentToken`).
 - **Hanya uninstall murni** — saat upgrade, guard dilewati.
-- Flag maintenance: `C:\Users\Public\Documents\v3netbill-agent-stop.flag` — bila ada, watchdog
+- Flag maintenance: `%PUBLIC%\v3netbill-agent-stop.flag` — bila ada, watchdog
   tidak bangkitkan overlay.
+
+> ⚠️ **Path-nya TIDAK ada `Documents`.** Nilai diambil dari environment variable
+> `PUBLIC` oleh `Agent.Core/FlagPaths.cs`, sama persis untuk service, overlay,
+> `watchdog.cmd`, dan `uninstall-old-agent.bat`.
+>
+> ⚠️ **Kalau flag ini ada, overlay tidak akan pernah muncul — sama sekali.**
+> Overlay justru MELETAK dan LANGSUNG KELUAR. Di `agent.log` sekarang ditulis
+> `Watchdog: stop flag ada (...)`; sebelumnya hanya ke `_logger`, sehingga dari
+> log terlihat seperti watchdog tidak pernah jalan sama sekali.
+> Gejalanya sangat mudah disalahartikan: `Agent.Overlay.exe` muncul sebentar di
+> tasklist lalu hilang, service sehat, agent konek, dan tidak ada satu pun
+> error. Remedy persis seperti di bawah.
 
 ### K emergencies & pulih normal
 - **Emergency STOP** (overlay): `Ctrl+Alt+Shift+F12` → masukkan PIN → tombol **STOP AGENT
   (DARURAT)**. Overlay mati, flag maintenance ditulis, service di-stop.
 - **Pulih normal**:
   ```bat
-  del "C:\Users\Public\Documents\v3netbill-agent-stop.flag"
+  del "%PUBLIC%\v3netbill-agent-stop.flag"
   sc config v3netbillAgent start= auto
   sc start v3netbillAgent
   ```
