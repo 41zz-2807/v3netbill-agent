@@ -22,7 +22,7 @@ setlocal EnableExtensions
 set "NAMA=v3NetbillAgent"
 set "TASK=\v3Netbill\Agent Watchdog"
 set "ALERT=%~dp0kirim-alert.ps1"
-set "FLAGSTOP=%PUBLIC%\Documents\v3netbill-agent-stop.flag"
+set "FLAGSTOP=%PUBLIC%\v3netbill-agent-stop.flag"
 set "PENUNDAH=%PUBLIC%\Documents\v3netbill-agent-uninstall-sah.flag"
 
 rem Operator SENGAJA menghentikan agent lewat PIN emergency.

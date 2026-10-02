@@ -287,8 +287,7 @@ del /f /q "%ProgramData%\Microsoft\Windows\Start Menu\Programs\StartUp\v3Netbill
 del /f /q "%AppData%\Microsoft\Windows\Start Menu\Programs\Startup\v3Netbill Agent Overlay.lnk" >nul 2>&1
 for /d %%D in ("%ProgramData%\Microsoft\Windows\Start Menu\Programs\v3Netbill Agent") do rd /s /q "%%D" >nul 2>&1
 for /d %%D in ("%AppData%\Microsoft\Windows\Start Menu\Programs\v3Netbill Agent") do rd /s /q "%%D" >nul 2>&1
-del /f /q "%PUBLIC%\Documents\v3netbill-agent-stop.flag" >nul 2>&1
-del /f /q "%USERPROFILE%\Documents\v3netbill-agent-stop.flag" >nul 2>&1
+del /f /q "%PUBLIC%\v3netbill-agent-stop.flag" >nul 2>&1
 echo [OK] file & shortcut dibersihkan
 
 :: 3g) Bersihkan registry agent

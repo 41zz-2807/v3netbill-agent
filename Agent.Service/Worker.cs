@@ -675,34 +675,36 @@ public class Worker : BackgroundService
         if (File.Exists(FlagPaths.StopFlag))
         {
             _logger.LogInformation("Stop flag ada — overlay tidak diluncurkan ulang (mode maintenance)");
+            AgentLog.Write($"Watchdog: stop flag ada ({FlagPaths.StopFlag}) — overlay tidak integrable");
             return;
         }
 
         try
         {
-            uint sesiInteraktif = InteractiveProcess.GetActiveConsoleSessionId();
             var processes = Process.GetProcessesByName("Agent.Overlay");
 
             // ⚠️ "Proses ada" BUKAN berarti overlay terlihat.
-            // Build sebelumnya membuat window di desktop service (lpDesktop
-            // kosong), jadi Agent.Overlay.exe hidup di session 0 sementara user
-            // menatap desktop session 1. Watchdog lama melihat proses itu dan
-            // mengira segalanya baik — sehingga overlay tak terlihat bisa
-            // bertahan selamanya tanpa pernah dilepas.
+            // Overlay yang lahir di session 0 (desktop service) tidak pernah
+            // terlihat user, tapi tetap muncul di tasklist — dan watchdog lama
+            // menganggapnya sehat, sehingga tak terlihat bisa menggantung.
             //
-            // Proses di luar sesi interaktif itu harus dibunuh, lalu biarkan
-            // RestartOverlay() yang membuat yang benar.
+            // ⚠️ Hanya session 0 yang dibunuh. Dulu criteria-nya "session id
+            // berbeda dari sesi konsol", dan itu BAHA: begitu operator memakai
+            // RDP, WTSGetActiveConsoleSessionId() mengembalikan sesi konsol
+            // sementara overlay berjalan di sesi RDP — jadi overlay yang
+            // benar-benar tampil justru dibunuh tiap 5 detik. Session 0 tidak
+            // pernah bisa dilihat user mana pun, jadi itu satu-satunya
+            // criteria yang aman.
             foreach (var p in processes)
             {
                 try
                 {
-                    if (sesiInteraktif != uint.MaxValue && p.SessionId != sesiInteraktif)
+                    if (p.SessionId == 0)
                     {
                         _logger.LogWarning(
-                            "Agent.Overlay berjalan di session {Aktual}, bukan sesi interaktif {Harapan} — dibunuh",
-                            p.SessionId, sesiInteraktif);
+                            "Agent.Overlay berjalan di session 0 (desktop service, tak terlihat) — dibunuh dan diluncar ulang");
                         AgentLog.Write(
-                            $"Watchdog: Agent.Overlay di session {p.SessionId} (harapan {sesiInteraktif}) — bunuh, lalu luncurkan ulang");
+                            "Watchdog: Agent.Overlay di session 0 (tak terlihat) — bunuh, lalu luncurkan ulang di sesi interaktif");
                         p.Kill();
                     }
                 }

@@ -13,9 +13,6 @@ namespace V3Netbill.Agent.Service;
 /// </summary>
 internal static class InteractiveProcess
 {
-    /// <summary>ID sesi konsol yang sedang aktif, atau 0xFFFFFFFF kalau tidak ada.</summary>
-    public static uint GetActiveConsoleSessionId() => WTSGetActiveConsoleSessionId();
-
     public static bool Launch(string exePath, string workingDir)
     {
         uint sessionId = WTSGetActiveConsoleSessionId();
