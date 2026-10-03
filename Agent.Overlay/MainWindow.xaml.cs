@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -66,12 +67,32 @@ public partial class MainWindow : Window
         // Wire events
         _pipeClient.MessageReceived += OnPipeMessage;
         _stateProxy.PropertyChanged += OnStatePropertyChanged;
+
+        // Watermark placeholder dikendalikan di sini, bukan lewat DataTrigger
+        // yang mengikat ke Text/Password.
+        //
+        // Alasannya PasswordBox.Password TIDAK memberi notifikasi ke binding
+        // WPF, jadi DataTrigger-nya tidak pernah berubah dan tulisan
+        // "PASSWORD" tetap menempel di atas teks yang diketik. Dilaporkan dari
+        // pemakaian nyata di PC kasir. TextBox.Text tidak terkena, tapi keduanya
+        // disamakan supaya tidak ada dua mekanisme berbeda di file yang sama.
+        KodeTextBox.TextChanged += (_, _) => SinkronWatermark(KodeWatermark, KodeTextBox.Text);
+        PasswordBox.PasswordChanged += (_, _) =>
+            SinkronWatermark(PasswordWatermark, PasswordBox.Password);
         Loaded += OnLoaded;
         Closing += OnClosing;
         KeyDown += OnKeyDown; // for technician shortcut
 
     }
 
+
+    /// <summary>Tampilkan watermark hanya kalau isiannya masih kosong.</summary>
+    private static void SinkronWatermark(TextBlock watermark, string isi)
+    {
+        bool kosong = string.IsNullOrEmpty(isi);
+        var ingin = kosong ? Visibility.Visible : Visibility.Collapsed;
+        if (watermark.Visibility != ingin) watermark.Visibility = ingin;
+    }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {

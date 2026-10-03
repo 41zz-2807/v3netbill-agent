@@ -133,7 +133,7 @@
                  (jari-jari sekitar 167px pada kartu selebar 2435px). Radius
                  lama 16 terlihat jauh lebih kotak dari mockup. -->
             <Border x:Name="LoginCard"
-                    Background="#FFFFFFFF"
+                    Background="#F2F5F7FA"
                     BorderBrush="#E2E8F0"
                     BorderThickness="1"
                     CornerRadius="28"
@@ -222,23 +222,15 @@
                                        Background="Transparent"
                                        Foreground="#0F172A" CaretBrush="#0D9488"
                                        Template="{StaticResource UnderlineFieldTemplate}"/>
-                              <TextBlock Text="KODE VOUCHER / MEMBER"
+                              <!-- Watermark dikendalikan dari code-behind, bukan
+                                   DataTrigger. Lihat CatatanWatermark di
+                                   MainWindow.xaml.cs. -->
+                              <TextBlock x:Name="KodeWatermark"
+                                         Text="KODE VOUCHER / MEMBER"
                                          IsHitTestVisible="False"
                                          FontSize="15"
                                          Foreground="#94A3B8"
-                                         VerticalAlignment="Center">
-                                  <TextBlock.Style>
-                                      <Style TargetType="TextBlock">
-                                          <Setter Property="Visibility" Value="Collapsed"/>
-                                          <Style.Triggers>
-                                              <DataTrigger Binding="{Binding Text, ElementName=KodeTextBox}"
-                                                           Value="">
-                                                  <Setter Property="Visibility" Value="Visible"/>
-                                              </DataTrigger>
-                                          </Style.Triggers>
-                                      </Style>
-                                  </TextBlock.Style>
-                              </TextBlock>
+                                         VerticalAlignment="Center"/>
                           </Grid>
                       </Grid>
                   </Border>
@@ -263,23 +255,12 @@
                                            Background="Transparent"
                                            Foreground="#0F172A" CaretBrush="#0D9488"
                                            Template="{StaticResource UnderlinePasswordTemplate}"/>
-                              <TextBlock Text="PASSWORD"
+                              <TextBlock x:Name="PasswordWatermark"
+                                         Text="PASSWORD"
                                          IsHitTestVisible="False"
                                          FontSize="15"
                                          Foreground="#94A3B8"
-                                         VerticalAlignment="Center">
-                                  <TextBlock.Style>
-                                      <Style TargetType="TextBlock">
-                                          <Setter Property="Visibility" Value="Collapsed"/>
-                                          <Style.Triggers>
-                                              <DataTrigger Binding="{Binding Password, ElementName=PasswordBox}"
-                                                           Value="">
-                                                  <Setter Property="Visibility" Value="Visible"/>
-                                              </DataTrigger>
-                                          </Style.Triggers>
-                                      </Style>
-                                  </TextBlock.Style>
-                              </TextBlock>
+                                         VerticalAlignment="Center"/>
                           </Grid>
                       </Grid>
                   </Border>
@@ -293,6 +274,7 @@
                           <Button x:Name="LoginButton"
                                   Content="LOGIN"
                                   Height="48"
+                                  Margin="0,30,0,0"
                                   FontSize="14" FontWeight="SemiBold"
                                   Background="#1E293B"
                                   Foreground="#FFFFFF"
