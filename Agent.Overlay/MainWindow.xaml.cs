@@ -49,9 +49,8 @@ public partial class MainWindow : Window
     // di halaman Pengaturan, karena hash yang diset di server tidak ada di PC
     // ini. Kalau admin sudah menyetelnya, hash-nya yang dipakai dan PIN ini
     // tidak berlaku lagi.
-    private const string EmergencyPin = "123456";
-    private static readonly string StopFlagPath =
-        FlagPaths.StopFlag;
+      private const string EmergencyPin = "123456";
+
 
     public MainWindow(ILogger<MainWindow> logger, PipeClient pipeClient, KeyboardHook keyboardHook, SessionStateProxy stateProxy, IConfiguration config)
     {
@@ -721,14 +720,22 @@ public partial class MainWindow : Window
 
     private void StopAgentButton_Click(object sender, RoutedEventArgs e)
     {
+        // ⚠️ Mode maintenance sekarang ditulis ke REGISTRY, bukan file.
+        // File punya tiga masalah yang semuanya sudah terbukti menyakitkan:
+        // tidak ada yang menghapusnya (satu-satunya jalan adalah `del` manual),
+        // MSI tidak bisa menghapusnya, dan path-nya berbeda antara user
+        // interaktif dan LocalSystem. Detail di Agent.Core/FlagPaths.cs.
+        //
+        // Service masih berjalan sampai dihentikan di bawah, jadi begitu agent
+        // konek lagi, PC ini langsung terlihat di dashboard.
         try
         {
-            File.WriteAllText(StopFlagPath, DateTime.Now.ToString("O"));
-            _logger.LogWarning("Emergency STOP — flag ditulis: {Path}", StopFlagPath);
+            FlagPaths.TulisMaintenance("Tombol STOP AGENT (DARURAT) di layar");
+            _logger.LogWarning("Emergency STOP — mode maintenance ditulis ke registry");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Gagal menulis stop flag");
+            _logger.LogError(ex, "Gagal menulis mode maintenance");
         }
 
         try
@@ -753,6 +760,7 @@ public partial class MainWindow : Window
         _keyboardHook.Disable();
         Application.Current.Shutdown();
     }
+
 
     private void PinCancelButton_Click(object sender, RoutedEventArgs e)
     {
