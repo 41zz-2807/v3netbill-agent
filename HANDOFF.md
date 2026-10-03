@@ -99,6 +99,38 @@ Registry: `HKLM\Software\v3Netbill\Agent` (dan `WOW6432Node` untuk installer 32-
 
 ## 7. Mekanisme Penting
 
+- **Mode maintenance** — disimpan di REGISTRY
+  `HKLM\Software\v3Netbill\Agent\MaintenanceMode` (bersama `MaintenanceSince`
+  dan `MaintenanceReason`). Dulu file di `%PUBLIC%`. Alasannya tiga, semuanya
+  sudah terbukti menyakitkan: tidak ada komponen yang menghapus file itu
+  (satu-satunya jalan `del` manual), MSI tidak bisa menghapus file di
+  `%PUBLIC%`, dan `Environment.SpecialFolder.CommonDocuments` bernilai BERBEDA
+  antara user interaktif dan LocalSystem.
+  - **Artinya PC TERBUKA tanpa penagihan.** Service berhenti + overlay tidak
+    jalan. Siapa pun yang lewat bisa memakai PC itu gratis.
+  - Installer mengakhirinya lewat `ClearMaintenanceAction`
+    (`Agent.Overlay.exe --clear-maintenance`). Kotak "Jaga mode maintenance"
+    di dialog untuk teknisi yang sedang memperbaiki; default TIDAK dicentang.
+  - `FlagPaths.MigrasiFlagLama()` memindahkan file lama ke registry sekali
+    saja, supaya PC yang sudah terjebak bisa diselamatkan tanpa `del`.
+  - Mode maintenance **tidak** memblokir Task Manager — PC sedang dibuka untuk
+    diperbaiki, dan memblokir Task Manager menutup alat pertama teknisi.
+  - Cara Recovery kalau tidak bisa pasang ulang MSI:
+    ```
+    reg delete "HKLM\Software\v3Netbill\Agent" /v MaintenanceMode /f
+    reg delete "HKLM\Software\v3Netbill\Agent" /v MaintenanceSince /f
+    ```
+- **Log dikirim ke Nextcloud** — `Agent.Core/NextcloudLogUploader.cs`, WebDAV
+  (`PUT /remote.php/dav/files/<user>/<folder>/<berkas>`), tiap 5 menit plus
+  sekali saat start. Berdiri sendiri dari koneksi ke v3netbill.
+  - Kredensial dibaca dari registry, diisi installer lewat
+    `Agent.Overlay.exe --set-nextcloud`. **Jangan pernah** menaruh URL/user/
+    password di source atau `appsettings.json` — repo ini publik.
+  - Nama berkas diberi prefix PC ID supaya beberapa PC tidak saling menimpa.
+  - Log > 4 MB dipangkas ke 512 KB terakhir.
+  - Folder default: `log-pc-warnet`.
+
+
 - **Single-instance overlay**: mutex `Global\V3NetbillAgentOverlay` di `App.OnStartup`.
 - **Named pipe**: `NamedPipeServerStream` mode Message; ACL Everyone via `SecureNamedPipe.cs`
   (`SetNamedSecurityInfoW` + SDDL `D:(A;;GA;;;WD)`).
@@ -117,8 +149,7 @@ Registry: `HKLM\Software\v3Netbill\Agent` (dan `WOW6432Node` untuk installer 32-
   `Agent.Overlay.exe --uninstall-guard` **sebelum** `RemoveFiles`.
 - Guard memverifikasi PIN admin lewat `/api/settings/verify-pin` (butuh `pcId` + `agentToken`).
 - **Hanya uninstall murni** — saat upgrade, guard dilewati.
-- Flag maintenance: `%PUBLIC%\v3netbill-agent-stop.flag` — bila ada, watchdog
-  tidak bangkitkan overlay.
+- (Dulu flag maintenance berupa file. Sekarang registry — lihat "Mekanisme Penting".)
 
 > ⚠️ **Path-nya TIDAK ada `Documents`.** Nilai diambil dari environment variable
 > `PUBLIC` oleh `Agent.Core/FlagPaths.cs`, sama persis untuk service, overlay,
@@ -137,7 +168,7 @@ Registry: `HKLM\Software\v3Netbill\Agent` (dan `WOW6432Node` untuk installer 32-
   (DARURAT)**. Overlay mati, flag maintenance ditulis, service di-stop.
 - **Pulih normal**:
   ```bat
-  del "%PUBLIC%\v3netbill-agent-stop.flag"
+  reg delete "HKLM\Software\v3Netbill\Agent" /v MaintenanceMode /f
   sc config v3netbillAgent start= auto
   sc start v3netbillAgent
   ```
