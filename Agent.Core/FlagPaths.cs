@@ -226,9 +226,10 @@ public static class FlagPaths
     /// Simpan satu nilai konfigurasi ke key agent, tanpa menimpa nilai kosong.
     /// </summary>
     /// <remarks>
-    /// Dipakai installer lewat <c>Agent.Overlay.exe --set-nextcloud</c>. Nama
-    /// nilai dibatasi allow-list supaya argumen baris perintah tidak bisa
-    /// menulis key registry sembarang — custom action dijalankan sebagai SYSTEM.
+    /// Dipakai <c>Worker.OnNextcloudConfigReceived</c> ketika server mendorong
+    /// konfigurasi. Nama nilai dibatasi allow-list supaya pemanggil tidak bisa
+    /// menulis key registry sembarang — allow-list itu wajib: nilainya sensitif dan pemanggilnya
+    /// berjalan di dalam service SYSTEM.
     /// </remarks>
     public static bool SimpanKonfigurasi(string nama, string nilai)
     {

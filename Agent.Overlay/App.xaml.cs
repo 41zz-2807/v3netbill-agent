@@ -62,59 +62,6 @@ public partial class App : Application
                 return;
             }
 
-            // Mode SET NEXTCLOUD: dipanggil MSI sebagai custom action DEFERRED
-            // (jalur sebagai SYSTEM) sesudah file terpasang.
-            //
-            // ⚠️ Yang TIDAK ditulis kalau nilainya kosong — itu seluruh
-            // alasan mode ini ada. Nilai properti MSI tidak bertahan antar
-            // instalasi, jadi field dialog yang dikosongkan (keadaan normal
-            // saat operator sok upgrade) akan menimpa nilai lama dengan string
-            // kosong kalau ditulis apa adanya. Pola yang sama dulu menghapus
-            // PcId dan membuat agent jatuh ke default "PC001".
-            //
-            // Upgrade dengan dialog dikosongkan = kredensial lama utuh.
-            // Install baru dengan dialog dikosongkan = fitur tidak dipakai.
-            if (string.Equals(arg, "--set-nextcloud", StringComparison.OrdinalIgnoreCase))
-            {
-                AgentLog.Write("Mode SET NEXTCLOUD — menyimpan kredensial dari installer");
-                try
-                {
-                    string[] v = e.Args;
-                    int mulai = Array.IndexOf(v, "--set-nextcloud") + 1;
-                    string Ambil(int i) => mulai + i < v.Length ? v[mulai + i].Trim() : "";
-
-                    string url = Ambil(0);
-                    string user = Ambil(1);
-                    string pass = Ambil(2);
-                    string folder = Ambil(3);
-
-                    int ditulis = 0;
-                    void Simpan(string nama, string nilai)
-                    {
-                        // Kosong = biarkan nilai lama. INI inti dari mode ini.
-                        if (string.IsNullOrWhiteSpace(nilai)) return;
-                        FlagPaths.SimpanKonfigurasi(nama, nilai);
-                        ditulis++;
-                    }
-
-                    Simpan("NextcloudUrl", url);
-                    Simpan("NextcloudUser", user);
-                    Simpan("NextcloudPassword", pass);
-                    Simpan("NextcloudFolder", folder);
-
-                    AgentLog.Write(
-                        ditulis == 0
-                            ? "Kredensial Nextcloud tidak diisi — nilai lama di registry dipertahankan"
-                            : $"{ditulis} nilai Nextcloud disimpan dari installer");
-                }
-                catch (Exception ex)
-                {
-                    AgentLog.Write(ex, "Gagal menyimpan kredensial Nextcloud (diabaikan)");
-                }
-                Shutdown(0);
-                return;
-            }
-
             if (string.Equals(arg, "--uninstall-guard", StringComparison.OrdinalIgnoreCase))
             {
                 AgentLog.Write("Mode UNINSTALL GUARD aktif — verifikasi PIN admin");
