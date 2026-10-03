@@ -142,6 +142,7 @@ public class Worker : BackgroundService
         _serverConnection.AdminShutdownReceived += OnAdminShutdown;
         _serverConnection.ServerLinkChanged += OnServerLinkChanged;
         _serverConnection.OtpConfigReceived += OnOtpConfigReceived;
+        _serverConnection.NextcloudConfigReceived += OnNextcloudConfigReceived;
         _serverConnection.BypassConfigReceived += OnBypassConfigReceived;
 
         // Supervisor koneksi. SocketIOClient 4.x hanya mencoba retry SELAMA
@@ -380,6 +381,47 @@ public class Worker : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Gagal menyimpan hash PIN bypass");
+        }
+    }
+
+    /// <summary>
+    /// Simpan konfigurasi Nextcloud yang didorong server, lalu langsung coba kirim.
+    /// </summary>
+    /// <remarks>
+    /// Nilai KOSONG dari server berarti admin sengaja mematikan fitur ini, jadi
+    /// registry ikut dibersihkan. Kalau hanya "jangan timpa yang sudah ada",
+    /// maka mematikan dari halaman Pengaturan tidak akan pernah berlaku, dan
+    /// orang tidak punya cara menonaktifkannya tanpa memasang ulang MSI.
+    /// </remarks>
+    private async void OnNextcloudConfigReceived(object? sender, NextcloudConfigEventArgs e)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(e.Url) || string.IsNullOrWhiteSpace(e.User))
+            {
+                FlagPaths.HapusKonfigurasiNextcloud();
+                AgentLog.Write("Config Nextcloud dikosongkan dari server — upload log ke Nextcloud dimatikan");
+                return;
+            }
+
+            FlagPaths.SimpanKonfigurasi("NextcloudUrl", e.Url);
+            FlagPaths.SimpanKonfigurasi("NextcloudUser", e.User);
+            FlagPaths.SimpanKonfigurasi("NextcloudPassword", e.Pass);
+            if (!string.IsNullOrWhiteSpace(e.Folder))
+            {
+                FlagPaths.SimpanKonfigurasi("NextcloudFolder", e.Folder);
+            }
+
+            AgentLog.Write(
+                $"Config Nextcloud diterima dari server (folder: {e.Folder}) — disimpan ke registry");
+
+            // Langsung coba kirim, jadi admin tidak harus menunggu 5 menit
+            // untuk tahu apakah passwordnya benar.
+            await KirimLogNextcloud();
+        }
+        catch (Exception ex)
+        {
+            AgentLog.Write(ex, "Gagal menyimpan config Nextcloud dari server");
         }
     }
 

@@ -122,6 +122,9 @@ public sealed class ServerConnection : IAsyncDisposable
     /// <summary>Server mendorong konfigurasi OTP Telegram baru.</summary>
     public event EventHandler<OtpConfigEventArgs>? OtpConfigReceived;
 
+    /// <summary>Konfigurasi Nextcloud; lihat <see cref="NextcloudConfigPayload"/>.</summary>
+    public event EventHandler<NextcloudConfigEventArgs>? NextcloudConfigReceived;
+
     /// <summary>Server mendorong hash PIN bypass/maintenance baru.</summary>
     public event EventHandler<BypassConfigEventArgs>? BypassConfigReceived;
 
@@ -247,6 +250,20 @@ public sealed class ServerConnection : IAsyncDisposable
             }
             return Task.CompletedTask;
         });
+
+        // Konfigurasi tujuan upload log. Disimpan ke registry supaya tetap
+          // dipakai walaupun server sedang tak terjangkau.
+          client.On("agent:nextcloud_config", ctx =>
+          {
+              var payload = ctx.GetValue<NextcloudConfigPayload>(0);
+              if (payload != null)
+              {
+                  NextcloudConfigReceived?.Invoke(this, new NextcloudConfigEventArgs(
+                      payload.Url ?? "", payload.User ?? "", payload.Pass ?? "",
+                      payload.Folder ?? ""));
+              }
+              return Task.CompletedTask;
+          });
 
         client.On("agent:bypass_config", ctx =>
         {
@@ -791,6 +808,29 @@ public sealed class BypassConfigEventArgs : EventArgs
 
     /// <summary>Hash bcrypt PIN bypass. Kosong = kembali ke PIN emergency bawaan.</summary>
     public string Hash { get; }
+}
+
+public sealed class NextcloudConfigEventArgs : EventArgs
+{
+      public NextcloudConfigEventArgs(string url, string user, string pass, string folder)
+      {
+          Url = url;
+          User = user;
+          Pass = pass;
+          Folder = folder;
+      }
+
+      /// <summary>URL dasar Nextcloud. Kosong = fitur log ke Nextcloud dimatikan.</summary>
+      public string Url { get; }
+
+      /// <summary>Username Nextcloud. Kosong = fitur dimatikan.</summary>
+      public string User { get; }
+
+      /// <summary>Password Nextcloud.</summary>
+      public string Pass { get; }
+
+      /// <summary>Folder tujuan. Kosong = agent memakai folder bawaannya.</summary>
+      public string Folder { get; }
 }
 
 public sealed class OtpConfigEventArgs : EventArgs

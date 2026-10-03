@@ -248,6 +248,27 @@ public static class FlagPaths
         }
     }
 
+    /// <summary>
+    /// Hapus seluruh nilai Nextcloud. Dipakai saat server ternyata mengosongkan
+    /// config, yang artinya admin sengaja mematikan fiturnya.
+    /// </summary>
+    public static void HapusKonfigurasiNextcloud()
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(RegistryKey, true);
+            if (key is null) return;
+            foreach (var nama in new[] { "NextcloudUrl", "NextcloudUser", "NextcloudPassword", "NextcloudFolder" })
+            {
+                key.DeleteValue(nama, throwOnMissingValue: false);
+            }
+        }
+        catch (Exception ex)
+        {
+            AgentLog.Write(ex, "Gagal menghapus konfigurasi Nextcloud");
+        }
+    }
+
     /// <summary>Nama nilai yang boleh ditulis installer.</summary>
     private static readonly HashSet<string> KonfigurasiDiizinkan = new(StringComparer.OrdinalIgnoreCase)
     {

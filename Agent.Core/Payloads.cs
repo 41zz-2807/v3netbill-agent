@@ -100,6 +100,31 @@ public sealed class OtpConfigPayload
 }
 
 /// <summary>
+/// Event <c>agent:nextcloud_config</c> - server mendorong konfigurasi Nextcloud
+/// (tujuan upload log agent + overlay) setelah admin menyimpannya di halaman
+/// Pengaturan.
+/// </summary>
+/// <remarks>
+/// Disimpan ke registry PC, bukan ke appsettings.json atau source: repo ini
+/// publik, jadi password di sana akan terbaca seluruh dunia. Pola yang sama
+/// seperti <see cref="OtpConfigPayload"/>.
+/// </remarks>
+public sealed class NextcloudConfigPayload
+{
+    [JsonPropertyName("url")]
+    public string? Url { get; set; }
+
+    [JsonPropertyName("user")]
+    public string? User { get; set; }
+
+    [JsonPropertyName("pass")]
+    public string? Pass { get; set; }
+
+    [JsonPropertyName("folder")]
+    public string? Folder { get; set; }
+}
+
+/// <summary>
 /// Hash PIN bypass/maintenance yang didorong server lewat <c>agent:bypass_config</c>.
 /// </summary>
 /// <remarks>
