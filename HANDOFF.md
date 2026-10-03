@@ -123,10 +123,12 @@ Registry: `HKLM\Software\v3Netbill\Agent` (dan `WOW6432Node` untuk installer 32-
 - **Log dikirim ke Nextcloud** — `Agent.Core/NextcloudLogUploader.cs`, WebDAV
   (`PUT /remote.php/dav/files/<user>/<folder>/<berkas>`), tiap 5 menit plus
   sekali saat start. Berdiri sendiri dari koneksi ke v3netbill.
-  - Kredensial dibaca dari registry, diisi installer lewat
-    `Agent.Overlay.exe --set-nextcloud`. **Jangan pernah** menaruh URL/user/
-    password di source atau `appsettings.json` — repo ini publik.
-  - Nama berkas diberi prefix PC ID supaya beberapa PC tidak saling menimpa.
+  - Kredensial dibaca dari registry, diisi dari halaman **Pengaturan → Agent &
+    Keamanan**. **Jangan pernah** menaruh URL/user/password di source atau
+    `appsettings.json` — repo ini publik.
+  - Nama berkas memakai NAMA PC ("PC001-agent-2026-10-03.log"), bukan UUID.
+    Nama PC dikirim server lewat `agent:nextcloud_config` karena `pcId` berupa
+    UUID dan mustahil dipetakan orang ke PC tertentu.
   - Log > 4 MB dipangkas ke 512 KB terakhir.
   - Folder default: `log-pc-warnet`.
 
