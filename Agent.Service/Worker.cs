@@ -53,6 +53,7 @@ public class Worker : BackgroundService
     private NamedPipeServerStream? _pipeServer;
     private Task? _pipeListenerTask;
     private Timer? _watchdogTimer;
+        private Timer? _nextcloudTimer;
     private Task? _maintainTask;
     private SessionState _currentState = new() { State = SessionState.LockState.Locked };
     private string _overlayExePath = string.Empty;
@@ -87,8 +88,34 @@ public class Worker : BackgroundService
         AgentLog.Write("=== v3Netbill Agent Service starting ===");
         _logger.LogInformation("v3Netbill Agent Service starting...");
 
+        // Migrasi flag versi lama, lalu cek mode maintenance SEBELUM apa pun.
+        //
+        // ⚠️ Urutannya penting. Dulu service selalu memblokir Task Manager saat
+        // start, jadi ketika MSI memasang ulang agent di PC yang sedang
+        // maintenance, Task Manager ikut terkunci — padahal justru alat pertama
+        // yang dipakai teknisi untuk mencari masalah. Mode maintenance tidak
+        // pernah boleh memblokir Task Manager.
+        bool maintenance = false;
+        try
+        {
+            FlagPaths.MigrasiFlagLama();
+            maintenance = FlagPaths.MaintenanceAktif();
+        }
+        catch (Exception ex)
+        {
+            AgentLog.Write(ex, "Gagal memeriksa mode maintenance saat start");
+        }
+
+        if (maintenance)
+        {
+            AgentLog.Write(
+                $"MODE MAINTENANCE AKTIF saat start (sejak {FlagPaths.MaintenanceSince() ?? "tidak diketahui"}, " +
+                $"alasan: {FlagPaths.MaintenanceReason() ?? "tidak diisi"}) — " +
+                "PC TERBUKA tanpa billing; Task Manager dibiarkan terbuka");
+        }
+
         // Mode: PC terkunci saat idle (tanpa sesi). Mulai dengan blokir Task Manager.
-        SetTaskManagerBlocked(true);
+        SetTaskManagerBlocked(!maintenance);
 
         var serverUrl = GetConfig("Server:Url", "ServerUrl", "http://localhost:3000");
         var pcId = GetConfig("Agent:PcId", "PcId", "PC001");
@@ -127,6 +154,12 @@ public class Worker : BackgroundService
         // Start named pipe server
         _ = StartPipeServerAsync(_cts.Token);
 
+        // Kirim log ke Nextcloud tiap 5 menit. Berdiri sendiri dari koin log
+        // billing, jadi log tetap terkirim walau server v3netbill tak terjangkau.
+        _nextcloudTimer = new Timer(
+            _ => _ = KirimLogNextcloud(), null,
+            TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(5));
+
         // Start watchdog timer (check every 5 seconds)
         _watchdogTimer = new Timer(WatchdogCallback, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
 
@@ -139,6 +172,7 @@ public class Worker : BackgroundService
         finally
         {
             _watchdogTimer?.Dispose();
+        _nextcloudTimer?.Dispose();
             _pipeServer?.Dispose();
             if (_maintainTask != null)
             {
@@ -223,7 +257,21 @@ public class Worker : BackgroundService
             _currentState.SisaDetik = e.Payload.DurasiDetik;
             _currentState.State = SessionState.LockState.Unlocked;
         }
-        SetTaskManagerBlocked(false);
+        // ⚠️ WAJIB true. Baris ini pernah `false` sejak commit 5f75dd3
+        // (fitur idle-lock) — logikanya terbalik: Task Manager justru DIBUKA
+        // justru saat pelanggan mulai sesi berbayar.
+        //
+        // Efeknya kebalikan dari yang diinginkan warnet: selama sesi berjalan
+        // pelanggan bisa membuka Task Manager dan mematikan agent, jadi hitung
+        // mundur berhenti tanpa tercatat dan PC tetap bisa dipakai. Dilaporkan
+        // dari pemakaian nyata, dan lolos dari `dotnet build` maupun dari semua
+        // log — karena tidak ada yang gagal, task manager-nya diam-diam boleh
+        // dibuka saja.
+        //
+        // `false` hanya benar di dua tempat: service berhenti, dan mode
+        // maintenance (lihat SetTaskManagerBlocked).
+
+        SetTaskManagerBlocked(true);
         // StateUpdate (locked=false) HARUS dikirim & tiba dulu, baru identitas akun.
         // Sequential + semaphore = tidak pernah korup/tertukar.
         var stateSent = await SendStateUpdateAsync();
@@ -669,13 +717,25 @@ public class Worker : BackgroundService
     {
         if (_currentState.State != SessionState.LockState.Locked) return;
 
-        // Mode maintenance (emergency stop dari overlay): jangan luncurkan ulang.
-        // ⚠️ Path-nya harus sama persis dengan yang dipakai overlay, kalau tidak
-        // flag ini tidak akan pernah terlihat di sini. Lihat FlagPaths.
-        if (File.Exists(FlagPaths.StopFlag))
+        // Migrasi flag versi lama TIDAK diulang di sini — sudah dilakukan
+        // sekali di ExecuteAsync, dan FlagPaths.MigrasiFlagLama() idempoten
+        // (file-nya sudah hilang setelah migrasi pertama).
+
+        // Mode maintenance: PC sedang TERBUKA tanpa penagihan. Jangan luncurkan
+        // overlay, dan pastikan ini terlihat di agent.log.
+        //
+        // ⚠️ Dulu cabang ini hanya menulis ke _logger, jadi dari agent.log
+        // terlihat watchdog "tidak pernah jalan" — padahal justru sedang
+        // menahan pelepasan. Itu sebabnya mode maintenance sulit sekali
+        // ditemukan: tidak ada satu pun jejak di log service.
+        if (FlagPaths.MaintenanceAktif())
         {
-            _logger.LogInformation("Stop flag ada — overlay tidak diluncurkan ulang (mode maintenance)");
-            AgentLog.Write($"Watchdog: stop flag ada ({FlagPaths.StopFlag}) — overlay tidak integrable");
+            string sejak = FlagPaths.MaintenanceSince() ?? "tidak diketahui";
+            string alasan = FlagPaths.MaintenanceReason() ?? "tidak diisi";
+            _logger.LogInformation("Mode maintenance aktif — overlay tidak dijalankan");
+            AgentLog.Write(
+                $"Watchdog: MODE MAINTENANCE aktif (sejak {sejak}, alasan: {alasan}) " +
+                "— PC terbuka tanpa billing, overlay tidak dijalankan");
             return;
         }
 
@@ -728,6 +788,52 @@ public class Worker : BackgroundService
         {
             _logger.LogError(ex, "Watchdog error");
             AgentLog.Write(ex, "Watchdog error");
+        }
+    }
+
+    /// <summary>
+    /// Baca kredensial Nextcloud dari registry lalu kirim log agent + overlay.
+    /// </summary>
+    /// <remarks>
+    /// Kredensial ditulis installer ke <c>HKLM\Software\v3Netbill\Agent</c>, bukan
+    /// disimpan di appsettings.json atau di source — repo agent ini publik, jadi
+    /// password apa pun yang diletakkan di sana akan terbaca seluruh dunia.
+    /// <para>
+    /// Kosong = fitur tidak dipakai. Itu kondisi normal dan tidak perlu dicatat
+    /// ke log, supaya agent.log tidak penuh baris yang sama tiap menit.
+    /// </para>
+    /// </remarks>
+    private async Task KirimLogNextcloud()
+    {
+        try
+        {
+            string url = BacaReg("NextcloudUrl", "");
+            string user = BacaReg("NextcloudUser", "");
+            string pass = BacaReg("NextcloudPassword", "");
+            string folder = BacaReg("NextcloudFolder", NextcloudLogUploader.FolderBawaan);
+            string pcId = GetConfig("Agent:PcId", "PcId", "PC001");
+
+            await NextcloudLogUploader
+                .Kirim(url, user, pass, folder, pcId, _cts?.Token ?? CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            AgentLog.Write(ex, "KirimLogNextcloud gagal");
+        }
+    }
+
+    /// <summary>Baca satu nilai string dari key registry agent.</summary>
+    private static string BacaReg(string nama, string bawaan)
+    {
+        try
+        {
+            using var key = Registry.LocalMachine.OpenSubKey(@"Software\v3Netbill\Agent");
+            return key?.GetValue(nama) as string ?? bawaan;
+        }
+        catch
+        {
+            return bawaan;
         }
     }
 
@@ -817,6 +923,32 @@ public class Worker : BackgroundService
     /// </remarks>
     private void SetTaskManagerBlocked(bool block)
     {
+        // ⚠️ Mode maintenance TIDAK BOLEH memblokir Task Manager.
+        //
+        // Kalau ada pemeriksaan di sini, satu tempat ini menutup semua pemanggil
+        // (start, session berhenti, admin lock). Yang penting: mode maintenance
+        // berarti PC sedang terbuka untuk diperbaiki — memblokir Task Manager
+        // justru menutup alat pertama yang dipakai teknisi, dan tidak ada satu
+        // pun tanda apa yang terjadi.
+        if (block)
+        {
+            try
+            {
+                if (FlagPaths.MaintenanceAktif())
+                {
+                    AgentLog.Write(
+                        "SetTaskManagerBlocked: dilewati — mode maintenance aktif, " +
+                        "Task Manager dibiarkan terbuka untuk teknisi");
+                    return;
+                }
+            }
+            catch
+            {
+                // Registry tidak terbaca = anggap tidak ada maintenance, supaya tidak
+                // membuka PC yang seharusnya terkunci.
+            }
+        }
+
         const string keyPath = @"Software\Microsoft\Windows\CurrentVersion\Policies\System";
         const string valueName = "DisableTaskMgr";
         int tersentuh = 0;
