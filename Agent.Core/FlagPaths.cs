@@ -274,6 +274,7 @@ public static class FlagPaths
     private static readonly HashSet<string> KonfigurasiDiizinkan = new(StringComparer.OrdinalIgnoreCase)
     {
         "NextcloudUrl", "NextcloudUser", "NextcloudPassword", "NextcloudFolder",
+        "PcName",
     };
 
     /// <summary>Tulis penanda di path yang sama, aman kalau folder belum ada.</summary>

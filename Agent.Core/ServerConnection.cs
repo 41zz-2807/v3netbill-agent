@@ -260,7 +260,7 @@ public sealed class ServerConnection : IAsyncDisposable
               {
                   NextcloudConfigReceived?.Invoke(this, new NextcloudConfigEventArgs(
                       payload.Url ?? "", payload.User ?? "", payload.Pass ?? "",
-                      payload.Folder ?? ""));
+                      payload.Folder ?? "", payload.Nama ?? ""));
               }
               return Task.CompletedTask;
           });
@@ -812,13 +812,17 @@ public sealed class BypassConfigEventArgs : EventArgs
 
 public sealed class NextcloudConfigEventArgs : EventArgs
 {
-      public NextcloudConfigEventArgs(string url, string user, string pass, string folder)
+      public NextcloudConfigEventArgs(string url, string user, string pass, string folder, string nama)
       {
           Url = url;
           User = user;
           Pass = pass;
           Folder = folder;
+          Nama = nama;
       }
+
+      /// <summary>Nama PC yang bisa dibaca manusia. Kosong = pakai pcId.</summary>
+      public string Nama { get; }
 
       /// <summary>URL dasar Nextcloud. Kosong = fitur log ke Nextcloud dimatikan.</summary>
       public string Url { get; }

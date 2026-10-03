@@ -57,7 +57,7 @@ public static class NextcloudLogUploader
         string username,
         string password,
         string? folder,
-        string pcId,
+        string namaPc,
         CancellationToken ct = default)
     {
         if (!await Gate.WaitAsync(0, ct).ConfigureAwait(false))
@@ -110,7 +110,7 @@ public static class NextcloudLogUploader
                 ct.ThrowIfCancellationRequested();
                 try
                 {
-                    await KirimSatu(http, folderRemote, f, pcId, ct).ConfigureAwait(false);
+                    await KirimSatu(http, folderRemote, f, namaPc, ct).ConfigureAwait(false);
                     terkirim++;
                 }
                 catch (Exception ex)
@@ -220,13 +220,14 @@ public static class NextcloudLogUploader
         }
     }
 
-    private static async Task KirimSatu(HttpClient http, string folderRemote, string path, string pcId, CancellationToken ct)
+    private static async Task KirimSatu(HttpClient http, string folderRemote, string path, string namaPc, CancellationToken ct)
     {
         byte[] isi = File.ReadAllBytes(path);
         string nama = Path.GetFileName(path).Replace("potong-", "");
-        // PC ID di depan nama supaya beberapa PC tidak saling menimpa berkas
-        // dengan nama yang sama di folder yang sama.
-        string target = $"{folderRemote}/{Uri.EscapeDataString($"{pcId}-{nama}")}";
+        // Nama PC di depan, bukan pcId. pcId berupa UUID dan mustahil dipetakan
+        // orang ke PC tertentu - kalau nama berkasnya UUID, kasir tidak tahu
+        // itu log PC yang sedang dia perbaiki.
+        string target = $"{folderRemote}/{Uri.EscapeDataString(namaPc)}-{nama}";
 
         using var req = new HttpRequestMessage(HttpMethod.Put, target)
         {

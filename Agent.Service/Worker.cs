@@ -411,6 +411,12 @@ public class Worker : BackgroundService
             {
                 FlagPaths.SimpanKonfigurasi("NextcloudFolder", e.Folder);
             }
+            if (!string.IsNullOrWhiteSpace(e.Nama))
+            {
+                // Nama PC dibaca manusia. pcId berupa UUID dan mustahil dipetakan
+                // orang ke PC tertentu, jadi nama inilah yang jadi nama berkas.
+                FlagPaths.SimpanKonfigurasi("PcName", e.Nama);
+            }
 
             AgentLog.Write(
                 $"Config Nextcloud diterima dari server (folder: {e.Folder}) — disimpan ke registry");
@@ -853,10 +859,13 @@ public class Worker : BackgroundService
             string user = BacaReg("NextcloudUser", "");
             string pass = BacaReg("NextcloudPassword", "");
             string folder = BacaReg("NextcloudFolder", NextcloudLogUploader.FolderBawaan);
+            // Nama PC dibaca dari registry (dikirim server saat register).
+            // Fallback ke pcId supaya nama berkas tidak pernah kosong.
             string pcId = GetConfig("Agent:PcId", "PcId", "PC001");
+            string nama = BacaReg("PcName", pcId);
 
             await NextcloudLogUploader
-                .Kirim(url, user, pass, folder, pcId, _cts?.Token ?? CancellationToken.None)
+                .Kirim(url, user, pass, folder, nama, _cts?.Token ?? CancellationToken.None)
                 .ConfigureAwait(false);
         }
         catch (Exception ex)

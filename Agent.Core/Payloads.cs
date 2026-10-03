@@ -122,6 +122,17 @@ public sealed class NextcloudConfigPayload
 
     [JsonPropertyName("folder")]
     public string? Folder { get; set; }
+
+    /// <summary>
+    /// Nama PC yang dibaca manusia, mis. "PC001".
+    /// </summary>
+    /// <remarks>
+    /// Wajib ikut dikirim karena <c>pcId</c> berupa UUID dan sama sekali tidak
+    /// bisa dipetakan orang ke PC tertentu. Tanpa nama ini, berkas log di
+    /// Nextcloud bernama UUID dan kasir tidak tahu itu milik PC yang mana.
+    /// </remarks>
+    [JsonPropertyName("nama")]
+    public string? Nama { get; set; }
 }
 
 /// <summary>
