@@ -37,7 +37,7 @@
        ============================================= -->
   <Package UpgradeCode="7f3a9b1e-5c2d-4a8f-9e1b-3d6c8f4a2b7e"
            Name="v3Netbill Agent"
-           Version="1.0.12.0"
+           Version="1.0.13.0"
            Manufacturer="v3Netbill"
            Language="1033"
            Codepage="65001"
@@ -196,7 +196,7 @@
                  reg query "HKLM\SOFTWARE\v3Netbill\Agent" /v InstalledBuildUtc -->
           <RegistryValue Name="InstalledBuildUtc" Type="string" Value="[InstallDate]" />
 
-        </RegistryKey>
+</RegistryKey>
         <CreateFolder />
       </Component>
     </ComponentGroup>
@@ -265,9 +265,65 @@
                   Execute="immediate"
                   Return="check" />
 
+    <!-- ⚠️ Mode maintenance berarti PC TERBUKA tanpa penagihan, dan tidak ada
+         komponen pun yang menghapus penandanya — satu-satunya jalan lama
+         adalah `del` manual di cmd. Akibatnya PC bisa terbuka tanpa billing
+         selama berhari-hari dan overlay tidak pernah muncul lagi.
+
+         Installer inilah yang mengakhirinya. Dijalankan SEBAGAI SYSTEM
+         (Impersonate="no") karena targetnya HKLM.
+
+         Return="ignore" dengan sengaja: kegagalan membersihkan maintenance
+         tidak boleh menggagalkan instalasi agent. Kalau tidak, operator yang
+         sedang memperbaiki PC bisa mendapat mesin yang tidak bisa dipakai.
+
+         Execute="deferred" supaya jalan pada-sequence sebagai SYSTEM, dan
+         After="RemoveExistingProducts" supaya produk lama — termasuk
+         servicenya — sudah dibuang sebelum flag dibersihkan. Urutan itu penting:
+         kalau service masih hidup, watchdog bisa melihat mode maintenance
+         aktif sebelum sempat dibersihkan.
+
+         Condition memakai NOT, jadi KEEPMAINT yang kosong (default) berarti
+         "akhiri mode maintenance". Kotak "Jaga mode maintenance" yang
+         dicentang akan membalikannya. -->
+    <CustomAction Id="ClearMaintenanceAction"
+                  FileRef="AgentOverlayExeFile"
+                  ExeCommand="--clear-maintenance"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <!-- ⚠️ Kredensial Nextcloud TIDAK ditulis lewat <RegistryValue> di
+         Product.wxs, padahal itu cara paling wajar — dan justru itu yang
+         menyebabkan values yang tersimpan HILANG setiap kali upgrade.
+
+         Alasannya: nilai properti MSI tidak bertahan antar instalasi. Field
+         dialog yang dikosongkan — yaitu keadaan normal saat operator cuma
+         sok upgrade — akan menulis string kosong ke registry dan menimpa nilai
+         lama. Persis pola yang dulu membuat PcId kosong dan agent jatuh ke
+         default "PC001" (terlihat di log PC 2 Okt jam 17:04).
+
+         Jadi penulisan dipindah ke sini: nilainya diteruskan ke executable,
+         dan executable TIDAK menulis apa pun kalau argumennya kosong.
+         Upgrade dengan dialog dikosongkan = nilai lama utuh.
+
+         After="InstallFiles" karena Agent.Overlay.exe yang baru harus sudah
+         ada di folder tujuan. Execute="deferred" + Impersonate="no" supaya
+         menulis ke HKLM sebagai SYSTEM. Return="ignore" karena kegagalan
+         menulis kredensial log tidak boleh menggagalkan instalasi agent. -->
+    <CustomAction Id="SetNextcloudAction"
+                  FileRef="AgentOverlayExeFile"
+                  ExeCommand="--set-nextcloud &quot;[NEXTCLOUD_URL]&quot; &quot;[NEXTCLOUD_USER]&quot; &quot;[NEXTCLOUD_PASSWORD]&quot; &quot;[NEXTCLOUD_FOLDER]&quot;"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
     <InstallExecuteSequence>
       <Custom Action="UninstallGuardAction" Before="RemoveFiles"
               Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND NOT V3PINVERIFIED" />
+      <Custom Action="ClearMaintenanceAction" After="RemoveExistingProducts"
+              Condition="NOT KEEPMAINT" />
+      <Custom Action="SetNextcloudAction" After="InstallFiles" />
     </InstallExecuteSequence>
 
     <!-- ===== Shortcuts (start menu): shortcut "Uninstall v3Netbill Agent" di
@@ -278,35 +334,85 @@
     <!-- Fragment 1: definisi dialog konfigurasi server -->
     <Fragment>
       <UI>
-        <Dialog Id="ServerConfigDialog" Width="370" Height="270" Title="v3Netbill Agent - Konfigurasi Server">
-          <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="WixUI_Bmp_Banner" />
+        <Dialog Id="ServerConfigDialog" Width="370" Height="560" Title="v3Netbill Agent - Konfigurasi">
+          <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="WixUIBmp_Banner" />
           <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
-          <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+          <Control Id="BottomLine" Type="Line" X="0" Y="512" Width="370" Height="0" />
           <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes">
-            <Text Value="Konfigurasi Server" />
+            <Text Value="Konfigurasi" />
           </Control>
-          <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="30" Transparent="yes" NoPrefix="yes">
-            <Text Value="Isi alamat server billing, ID PC, dan Token agent yang dibuat di dashboard." />
+          <Control Id="Description" Type="Text" X="25" Y="23" Width="320" Height="30" Transparent="yes" NoPrefix="yes">
+            <Text Value="Isi alamat server billing, ID PC, dan Token agent dari dashboard." />
           </Control>
 
-          <Control Id="ServerUrlLabel" Type="Text" X="15" Y="80" Width="100" Height="17" Transparent="yes" NoPrefix="yes">
+          <!-- ===== Grup 1: server billing ===== -->
+          <Control Id="GrpServerLabel" Type="Text" X="15" Y="66" Width="340" Height="14" Transparent="yes" NoPrefix="yes">
+            <Text Value="SERVER BILLING" />
+          </Control>
+
+          <Control Id="ServerUrlLabel" Type="Text" X="15" Y="86" Width="100" Height="14" Transparent="yes" NoPrefix="yes">
             <Text Value="Server URL:" />
           </Control>
-          <Control Id="ServerUrlEdit" Type="Edit" X="15" Y="100" Width="340" Height="21" Property="SERVER_URL" />
+          <Control Id="ServerUrlEdit" Type="Edit" X="15" Y="104" Width="340" Height="21" Property="SERVER_URL" />
 
-          <Control Id="PcIdLabel" Type="Text" X="15" Y="130" Width="100" Height="17" Transparent="yes" NoPrefix="yes">
+          <Control Id="PcIdLabel" Type="Text" X="15" Y="132" Width="100" Height="14" Transparent="yes" NoPrefix="yes">
             <Text Value="PC ID:" />
           </Control>
           <Control Id="PcIdEdit" Type="Edit" X="15" Y="150" Width="340" Height="21" Property="PC_ID" />
 
-          <Control Id="TokenLabel" Type="Text" X="15" Y="180" Width="100" Height="17" Transparent="yes" NoPrefix="yes">
+          <Control Id="TokenLabel" Type="Text" X="15" Y="178" Width="100" Height="14" Transparent="yes" NoPrefix="yes">
             <Text Value="Agent Token:" />
           </Control>
-          <Control Id="TokenEdit" Type="Edit" X="15" Y="200" Width="340" Height="21" Property="AGENT_TOKEN" Password="yes" />
+          <Control Id="TokenEdit" Type="Edit" X="15" Y="196" Width="340" Height="21" Property="AGENT_TOKEN" Password="yes" />
 
-          <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
-          <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)" />
-          <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <!-- ===== Grup 2: log Nextcloud =====
+               Kredensial ini TIDAK pernah ditulis di source atau di appsettings.json:
+               repo agent ini publik, jadi password yang diletakkan di sana akan
+               terbaca seluruh dunia. Installer menanyakannya sekali, lalu
+               menyimpannya di HKLM seperti AgentToken di atas.
+
+               Kosongkan semua kalau tidak dipakai — agent lalu tidak mengirim
+               apa pun ke Nextcloud. -->
+          <Control Id="GrpNextcloudLabel" Type="Text" X="15" Y="234" Width="340" Height="14" Transparent="yes" NoPrefix="yes">
+            <Text Value="KIRIM LOG KE NEXTCLOUD (opsional)" />
+          </Control>
+
+          <Control Id="NcUrlLabel" Type="Text" X="15" Y="254" Width="330" Height="14" Transparent="yes" NoPrefix="yes">
+            <Text Value="URL Nextcloud (tanpa /apps, tanpa /index.php):" />
+          </Control>
+          <Control Id="NcUrlEdit" Type="Edit" X="15" Y="272" Width="340" Height="21" Property="NEXTCLOUD_URL" />
+
+          <Control Id="NcUserLabel" Type="Text" X="15" Y="300" Width="100" Height="14" Transparent="yes" NoPrefix="yes">
+            <Text Value="Username:" />
+          </Control>
+          <Control Id="NcUserEdit" Type="Edit" X="15" Y="318" Width="340" Height="21" Property="NEXTCLOUD_USER" />
+
+          <Control Id="NcPassLabel" Type="Text" X="15" Y="346" Width="100" Height="14" Transparent="yes" NoPrefix="yes">
+            <Text Value="Password:" />
+          </Control>
+          <Control Id="NcPassEdit" Type="Edit" X="15" Y="364" Width="340" Height="21" Property="NEXTCLOUD_PASSWORD" Password="yes" />
+
+          <Control Id="NcFolderLabel" Type="Text" X="15" Y="392" Width="200" Height="14" Transparent="yes" NoPrefix="yes">
+            <Text Value="Folder:" />
+          </Control>
+          <Control Id="NcFolderEdit" Type="Edit" X="15" Y="410" Width="340" Height="21" Property="NEXTCLOUD_FOLDER" />
+
+          <!-- ⚠️ Mode maintenance berarti PC TERBUKA tanpa penagihan. Kalau
+               tertinggal, siapa pun yang lewat bisa memakai PC itu gratis dan
+               tidak ada satu pun tanda di layar. Karena itu instalasi ini SELALU
+               mengakhiri mode maintenance — kecuali operator yang sedang
+               memperbaiki PC dan butuh tetap terbuka.
+
+               Default TIDAK dicentang, jadi property KEEPMAINT kosong = "akhiri".
+               Dicentang = JAGA. -->
+          <Control Id="KeepMaintenanceCheckBox" Type="CheckBox"
+                    X="15" Y="452" Width="340" Height="17"
+                    Property="KEEPMAINT" CheckBoxValue="1"
+                    Text="Jaga mode maintenance (PC tetap terbuka — untuk sedang memperbaiki)" />
+
+          <Control Id="Back" Type="PushButton" X="180" Y="521" Width="56" Height="17" Text="!(loc.WixUIBack)" />
+          <Control Id="Next" Type="PushButton" X="236" Y="521" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)" />
+          <Control Id="Cancel" Type="PushButton" X="304" Y="521" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
             <Publish Event="SpawnDialog" Value="CancelDlg" />
           </Control>
         </Dialog>

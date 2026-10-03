@@ -17,24 +17,35 @@ rem  Yang TIDAK dilaporkan:
 rem    - operator menekan STOP AGENT (mode maintenance): ada flag-nya
 rem    - uninstall dengan PIN admin yang diterima: ada penanda dari UninstallGuardWindow
 rem ==============================================================================
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 
-set "NAMA=v3NetbillAgent"
-set "TASK=\v3Netbill\Agent Watchdog"
-set "ALERT=%~dp0kirim-alert.ps1"
-set "FLAGSTOP=%PUBLIC%\v3netbill-agent-stop.flag"
-set "PENUNDAH=%PUBLIC%\Documents\v3netbill-agent-uninstall-sah.flag"
+  set "NAMA=v3NetbillAgent"
+  set "TASK=\v3Netbill\Agent Watchdog"
+  set "ALERT=%~dp0kirim-alert.ps1"
+  set "PENUNDAH=%PUBLIC%\v3netbill-agent-uninstall-sah.flag"
+  set "REGKEY=HKLM\Software\v3Netbill\Agent"
 
-rem Operator SENGAJA menghentikan agent lewat PIN emergency.
-if exist "%FLAGSTOP%" exit /b 0
+  rem Operator SENGAJA menghentikan agent lewat PIN emergency.
+  rem
+  rem ⚠️ Mode maintenance sekarang dibaca dari REGISTRY, bukan file. Sumber
+  rem kebenaran yang sama dipakai Agent.Core/FlagPaths.cs, jadi tidak mungkin
+  rem lagi berbeda antar pembaca.
+  rem
+  rem Sengaja ditulis DATAR, bukan dengan `for` di dalam blok `if (...)`:
+  rem `exit /b` di dalam for-loop itu rapuh diparse, dan satu baris yang salah
+  rem parse berarti agent tidak pernah dijaga.
+  set "MAINT="
+  for /f "tokens3" %%A in ('reg query "%REGKEY%" /v MaintenanceMode 2^>nul') do set "MAINT=%%A"
+  if defined MAINT if not "!MAINT!"=="0x0" exit /b 0
 
-rem Uninstall yang PIN-nya sudah diterima oleh UninstallGuardWindow. Penanda
-rem dihapus di sini supaya tidak membuat peringatan undead diam-diam di
-rem kali uninstall berikutnya.
-if exist "%PENUNDAH%" (
-    del /f /q "%PENUNDAH%" >nul 2>&1
-    exit /b 0
-)
+  rem Uninstall yang PIN-nya sudah diterima oleh UninstallGuardWindow. Penanda
+  rem dihapus di sini supaya tidak membuat peringatan undead diam-diam di
+  rem kali uninstall berikutnya.
+  if exist "%PENUNDAH%" (
+      del /f /q "%PENUNDAH%" >nul 2>&1
+      exit /b 0
+  )
+
 
 sc qc %NAMA% >nul 2>&1
 if errorlevel 1 goto :hilang

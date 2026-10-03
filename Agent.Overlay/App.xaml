@@ -56,5 +56,34 @@
                 </Trigger>
             </ControlTemplate.Triggers>
         </ControlTemplate>
+
+          <!-- ===== Field login gaya mockup (garis bawah, bukan pil) =====
+               Mockup "form_login_webdanpc.jpg" memakai field BERGARIS BAWAH
+               dengan ikon di kiri, bukan kotak rounded. Template di sini
+               membuang border bawaan WPF; garisnya digambar oleh Border
+               pembungkus di MainWindow.xaml, jadi template ini hanya butuh
+               content presenter.
+
+               ⚠️ PENTING: pemanggil harus mengeset BorderThickness="0".
+               Kalau tidak, field tampil dengan kotak built-in WPF DAN garis
+               bawah dari Border pembungkus — dua garis, dan yang bawaan WPF
+               membuat mockup tidak tercapai sama sekali. -->
+          <ControlTemplate x:Key="UnderlineFieldTemplate" TargetType="TextBox">
+              <ScrollViewer x:Name="PART_ContentHost"
+                            VerticalAlignment="Center"
+                            Focusable="False"
+                            HorizontalScrollBarVisibility="Hidden"
+                            VerticalScrollBarVisibility="Hidden"/>
+          </ControlTemplate>
+
+          <!-- PasswordBox tidak bisa memakai template TextBox: TargetType-nya
+               berbeda dan WPF menolaknya. Butuh salinan sendiri. -->
+          <ControlTemplate x:Key="UnderlinePasswordTemplate" TargetType="PasswordBox">
+              <ScrollViewer x:Name="PART_ContentHost"
+                            VerticalAlignment="Center"
+                            Focusable="False"
+                            HorizontalScrollBarVisibility="Hidden"
+                            VerticalScrollBarVisibility="Hidden"/>
+          </ControlTemplate>
     </Application.Resources>
 </Application>
