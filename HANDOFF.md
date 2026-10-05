@@ -31,7 +31,7 @@ Config dibaca `GetConfig()` (`Agent.Service/Worker.cs:608`) dengan urutan:
 
 Registry: `HKLM\Software\v3Netbill\Agent` (dan `WOW6432Node` untuk installer 32-bit):
 - `ServerUrl` — **WAJIB skema lengkap**, mis. `https://v3netbill.<domain>` atau
-  `http://192.168.1.65:3000`. Tanpa skema → `new Uri(...)` di `Agent.Core/ServerConnection.cs:74`
+  `http://192.168.1.59:3000`. Tanpa skema → `new Uri(...)` di `Agent.Core/ServerConnection.cs:74`
   gagal.
 - `PcId` — UUID PC, dibuat di dashboard.
 - `AgentToken` — token agent, dibuat di dashboard.
@@ -48,7 +48,7 @@ Registry: `HKLM\Software\v3Netbill\Agent` (dan `WOW6432Node` untuk installer 32-
 2. Download MSI dari GitHub Actions run terbaru (repo agent).
 3. Jalankan MSI → isi dialog **Konfigurasi Server**:
    - **Server URL** — domain publik untuk PC di luar jaringan, atau
-     `http://192.168.1.65:3000` (PC satu jaringan LAN dengan server). **Harus ada skema.**
+     `http://192.168.1.59:3000` (PC satu jaringan LAN dengan server). **Harus ada skema.**
      Nilai domain publik tidak disimpan di dokumen ini — ambil dari dashboard PC.
    - **PC ID** — UUID dari dashboard.
    - **Agent Token** — token dari dashboard.
