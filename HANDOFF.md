@@ -212,6 +212,43 @@ Registry: `HKLM\Software\v3Netbill\Agent` (dan `WOW6432Node` untuk installer 32-
     dotnet build v3NetbillAgent.sln -p:EnableWindowsTargeting=true
   ```
 
+### 🔴 Cara MSI sampai ke Pengaturan → Installer (11 Okt 2026)
+
+**Tidak ada lagi step upload di dalam workflow.** Build tetap di GitHub, tetapi
+penyerahan file dipindah ke server produksi:
+
+```
+git push  →  Actions build MSI  →  artifact
+                                    ↓  (server menarik, tiap 20 menit)
+        /home/warnet/docker/v3netbill/sinkron-agent-msi
+                                    ↓  POST http://127.0.0.1:3000/api/settings/installer
+        Pengaturan → Installer  →  kasir mengunduh
+```
+
+Runner GitHub **tidak bisa** mengunggah sendiri, dan sudah dibuktikan dua kali:
+
+| Gejala | Penyebab | Bukti |
+|---|---|---|
+| `403 Forbidden` | Cloudflare Bot Fight Mode menolak IP datacenter GitHub | Request tidak pernah muncul di log `cloudflared` maupun backend |
+| `524` (setelah Bot Fight Mode dimatikan) | Batas 100 detik Cloudflare; unggah 64 MB butuh ~640 detik pada koneksi runner ~100 KB/s | Log tunnel: `Incoming request ended abruptly: context canceled` |
+
+Self-hosted runner **tidak bisa** menutup masalah ini: `build-agent.yml` tetap
+memerlukan `windows-latest` karena targetnya `net8.0-windows` + `UseWPF` + WiX.
+Tidak ada mesin Windows di jaringan rumah yang cocok untuk dijadikan runner.
+
+Yang membuat skrip server-side berhasil adalah mengunggah ke `127.0.0.1`:
+tidak melewati Cloudflare, jadi tidak mungkin kena 403/524.
+
+⚠️ **Skrip sengaja TIDAK memfilter run `success`.** Run yang statusnya `failure`
+justru yang paling sering dipakai — satu-satunya langkah yang pernah gagal di
+workflow ini adalah upload ke backend, sementara build dan "Verify MSI contents"
+sudah lolos. Penyaring yang benar adalah **ketersediaan artifact**, bukan status.
+
+⚠️ **Naikkan `Product/@Version` di `Installer/Product.wxs` setiap ada perubahan.**
+Step "Verify MSI contents" hanya gagal kalau versinya persis `1.0.9.0`, sehingga
+build dengan isi berbeda tapi versi sama akan lolos — dan MSI lama/baru jadi
+tidak dapat dibedakan.
+
 ---
 
 ## 11. Yang Perlu Diketahui Sesi Berikutnya

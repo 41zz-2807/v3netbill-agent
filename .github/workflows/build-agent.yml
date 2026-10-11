@@ -250,32 +250,23 @@ jobs:
           path: ${{ github.workspace }}/artifacts/${{ env.MSI_OUT }}
           retention-days: 30
 
-      # ----- Auto-upload MSI ke Backend (panel admin > Pengaturan > Installer) -----
-      - name: Upload MSI to Backend
-        env:
-          V3NETBILL_BACKEND_URL: ${{ secrets.V3NETBILL_BACKEND_URL }}
-          V3NETBILL_ADMIN_USER: ${{ secrets.V3NETBILL_ADMIN_USER }}
-          V3NETBILL_ADMIN_PASSWORD: ${{ secrets.V3NETBILL_ADMIN_PASSWORD }}
-        shell: pwsh
-        run: |
-          $ws = "${{ github.workspace }}"
-          if ([string]::IsNullOrEmpty($env:V3NETBILL_ADMIN_USER)) {
-            Write-Host "Secret V3NETBILL_ADMIN_USER belum diatur; lewati upload."; exit 0
-          }
-          try {
-            $login = Invoke-RestMethod -Method Post `
-              -Uri "$env:V3NETBILL_BACKEND_URL/api/auth/login" `
-              -ContentType "application/json" `
-              -Body (@{ username = $env:V3NETBILL_ADMIN_USER; password = $env:V3NETBILL_ADMIN_PASSWORD } | ConvertTo-Json)
-          } catch {
-            Write-Host "Gagal login backend: $($_.Exception.Message)"; exit 1
-          }
-          $token = $login.access_token
-          $msi = "$ws/artifacts/${{ env.MSI_OUT }}"
-          curl.exe -sS -f -o "$ws/upload-result.json" `
-            -X POST "$env:V3NETBILL_BACKEND_URL/api/settings/installer" `
-            -H "Authorization: Bearer $token" `
-            -F "file=@${msi};type=application/vnd.ms-installer"
-          if ($LASTEXITCODE -ne 0) { Write-Host "Upload gagal"; exit 1 }
-          Write-Host "MSI berhasil di-upload ke backend:"
-          Get-Content "$ws/upload-result.json"
+      # ----- Unggah ke backend: PINDAH KE SERVER, BUKAN DI SINI -----
+      # DIHAPUS 11 Okt 2026. Runner GitHub tidak bisa mengunggah MSI ke backend:
+      #
+      #   1. Cloudflare membalas 403 ke runner. Penyebabnya Bot Fight Mode.
+      #   2. Setelah dimatikan, upload 64 MB kena batas 100 detik Cloudflare
+      #      dan dibalas 524, karena koneksi runner ke internet ~100 KB/s
+      #      sehingga butuh sekitar 640 detik.
+      #
+      # Self-hosted runner tidak bisa menutup ini: workflow ini tetap butuh
+      # windows-latest karena targetnya net8.0-windows + UseWPF + WiX.
+      #
+      # Yang menggantikannya: script `sinkron-agent-msi` di server produksi
+      # (/home/warnet/docker/v3netbill/). Dia menarik artifact dari run ini,
+      # lalu mengunggah ke http://127.0.0.1:3000 — tidak melewati Cloudflare,
+      # jadi cepat dan tidak pernah kena 403/524. Dijalankan tiap 20 menit
+      # lewat crontab, dan hanya mengunggah kalau versinya benar-benar beda.
+      #
+      # Kalau satu MSI ini yang harus segera sampai sebelum jadwal cron, jalankan
+      # manual dari server:
+      #   /home/warnet/docker/v3netbill/sinkron-agent-msi
