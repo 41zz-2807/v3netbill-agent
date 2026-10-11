@@ -46,6 +46,15 @@ public partial class MainWindow : Window
     private DispatcherTimer? _countdownTimer;
     private BuatPasswordDialogWindow? _dialogGantiPassword;
 
+    // Mini window langsung disembunyikan begitu login berhasil. Dipakai sekali
+    // per sesi: begitu diminimize, flag-nya dibersihkan supaya StateUpdate
+    // berikutnya tidak memunculkan window lagi.
+    private bool _autoSembunyiMini;
+
+    // Nilai Locked terakhir yang diketahui. Bersama _autoSembunyiMini ini
+    // membedakan "baru saja login" dari "tick berikutnya".
+    private bool _terakhirLocked = true;
+
     // PIN bypass cadangan. Dipakai HANYA kalau admin belum menyetel PIN bypass
     // di halaman Pengaturan, karena hash yang diset di server tidak ada di PC
     // ini. Kalau admin sudah menyetelnya, hash-nya yang dipakai dan PIN ini
@@ -200,6 +209,16 @@ public partial class MainWindow : Window
                 {
                     _dialogGantiPassword?.Close();
                     _dialogGantiPassword = null;
+                    _autoSembunyiMini = false;
+                    _terakhirLocked = true;
+                }
+                else if (_terakhirLocked)
+                {
+                    // Cuma di detik loginlah (Locked true→false), bukan setiap
+                    // tick. Tanpa syarat ini, satu kali login sudah cukup untuk
+                    // membuat mini window auto-minimize terulang terus.
+                    _terakhirLocked = false;
+                    _autoSembunyiMini = true;
                 }
 
                 UpdateVisibility();
@@ -221,6 +240,7 @@ public partial class MainWindow : Window
             LoginCard.Visibility = Visibility.Visible;
             MiniPanel.Visibility = Visibility.Collapsed;
             AdminPinButton.Visibility = Visibility.Visible;
+            PowerButtons.Visibility = Visibility.Visible;
         }
         else if (sessionActive)
         {
@@ -229,6 +249,7 @@ public partial class MainWindow : Window
             ContentPanel.Visibility = Visibility.Collapsed;
             MiniPanel.Visibility = Visibility.Visible;
             AdminPinButton.Visibility = Visibility.Collapsed;
+            PowerButtons.Visibility = Visibility.Collapsed;
         }
         else
         {
@@ -237,6 +258,7 @@ public partial class MainWindow : Window
             ContentPanel.Visibility = Visibility.Collapsed;
             MiniPanel.Visibility = Visibility.Collapsed;
             AdminPinButton.Visibility = Visibility.Collapsed;
+            PowerButtons.Visibility = Visibility.Collapsed;
         }
 
         // ⚠️ WAJIB di luar cabang, dipanggil sekali di akhir. Versi awal
@@ -264,7 +286,6 @@ public partial class MainWindow : Window
             // Mini window — desktop tetap bisa dipakai, window bisa di-minimize tapi tidak bisa di-close
             SetNoActivate(false);
             WindowStyle = WindowStyle.None;
-            WindowState = WindowState.Normal;
             ResizeMode = ResizeMode.NoResize;
             Width = 340;
             Height = 268;
@@ -273,6 +294,20 @@ public partial class MainWindow : Window
             Topmost = true;
             ShowInTaskbar = true;   // biar bisa di-restore dari taskbar setelah di-minimize
             _keyboardHook.Disable();
+
+            // ⚠️ JANGAN memaksa WindowState = Normal di sini. Fungsi ini dipanggil
+            // juga setiap kali StateUpdate datang, sehingga window mini yang
+            // sengaja di-minimize akan tersorak kembali ke layar tiap kali ada
+            // perubahan state — termasuk yang di-minimize oleh pengguna sendiri.
+            if (_autoSembunyiMini)
+            {
+                _autoSembunyiMini = false;
+                WindowState = WindowState.Minimized;
+            }
+            else if (WindowState != WindowState.Minimized)
+            {
+                WindowState = WindowState.Normal;
+            }
             _logger.LogInformation("Overlay → SESSION (mini window, hook disabled)");
         }
         else
@@ -350,6 +385,9 @@ public partial class MainWindow : Window
                     break;
                 case PipeMessageType.CreatePasswordResult:
                     HandleCreatePasswordResult(msg.Payload);
+                    break;
+                case PipeMessageType.PowerResult:
+                    HandlePowerResult(msg.Payload);
                     break;
             }
         });
@@ -515,6 +553,111 @@ public partial class MainWindow : Window
         // Hanya minimize — window tidak boleh di-close (OnClosing selalu cancel).
         WindowState = WindowState.Minimized;
         AgentLog.Write("Sesi: window mini di-minimize");
+    }
+
+    // ================= Restart / matikan PC =================
+
+    /// <summary>
+    /// Tombol kuning: restart PC.
+    /// </summary>
+    private async void RestartButton_Click(object sender, RoutedEventArgs e)
+    {
+        await MintaPowerAsync(PowerAksi.Restart, "restart PC ini");
+    }
+
+    /// <summary>
+    /// Tombol merah: matikan PC.
+    /// </summary>
+    private async void ShutdownButton_Click(object sender, RoutedEventArgs e)
+    {
+        await MintaPowerAsync(PowerAksi.Matikan, "mematikan PC ini");
+    }
+
+    /// <summary>
+    /// Konfirmasi dulu, lalu teruskan ke service.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ Konfirmasi memakai MessageBox pemilik window ini, bukan MessageBox
+    /// tanpa pemilik. Overlay Topmost, dan dialog tanpa pemilik bisa muncul
+    /// DI BAWAH overlay — operator menekan Enter untuk "Ya" tanpa pernah melihat
+    /// pertanyaannya.
+    ///
+    /// ⚠️ Dialog konfirmasi memakai MessageBox terpisah dari ErrorText.
+    /// </remarks>
+    private async Task MintaPowerAsync(PowerAksi aksi, string kalimat)
+    {
+        if (!_pipeClient.IsConnected)
+        {
+            AgentLog.Write($"Aksi {aksi} ditolak — pipe ke service belum terhubung");
+            MessageBox.Show(
+                this,
+                "Agent service belum terhubung, jadi perintah tidak bisa dikirim. Coba lagi sebentar.",
+                "v3Netbill", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var tombol = aksi == PowerAksi.Restart ? RestartButton : ShutdownButton;
+        var jawab = MessageBox.Show(
+            this,
+            $"Yakin ingin {kalimat}?\n\nPC akan restart/mati dalam 10 detik dan tidak bisa dibatalkan.",
+            "v3Netbill",
+            MessageBoxButton.YesNo,
+            aksi == PowerAksi.Matikan ? MessageBoxImage.Warning : MessageBoxImage.Question);
+
+        if (jawab != MessageBoxResult.Yes)
+        {
+            AgentLog.Write($"Aksi {aksi} dibatalkan operator");
+            return;
+        }
+
+        tombol.IsEnabled = false;
+        try
+        {
+            await _pipeClient.SendPowerRequestAsync(aksi);
+        }
+        catch (Exception ex)
+        {
+            AgentLog.Write(ex, $"Gagal mengirim permintaan {aksi}");
+            MessageBox.Show(this, "Gagal mengirim perintah.", "v3Netbill",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            // Sengaja tidak diaktifkan lagi: PC akan mati dalam 10 detik, dan
+            // membiarkan tombol hidup flirtasi berarti operator bisa menekan
+            // dua kali.
+        }
+    }
+
+    /// <summary>Balasan service untuk permintaan restart/matikan.</summary>
+    private void HandlePowerResult(string json)
+    {
+        try
+        {
+            var hasil = JsonConvert.DeserializeObject<PowerResultPayload>(json);
+            if (hasil == null) return;
+
+            if (!hasil.Sukses)
+            {
+                // Service menolak (mis. masih ada sesi berjalan). Kembalikan
+                // tombol supaya operator bisa mencoba lagi setelah sesi berhenti.
+                RestartButton.IsEnabled = true;
+                ShutdownButton.IsEnabled = true;
+                AgentLog.Write($"Permintaan power ditolak: {hasil.Pesan}");
+                MessageBox.Show(this, hasil.Pesan ?? "Permintaan ditolak.", "v3Netbill",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+            else
+            {
+                AgentLog.Write($"Permintaan power diterima: {hasil.Pesan}");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Power result parse error");
+            RestartButton.IsEnabled = true;
+            ShutdownButton.IsEnabled = true;
+        }
     }
 
     private async void StopSesiButton_Click(object sender, RoutedEventArgs e)
@@ -807,4 +950,6 @@ public partial class MainWindow : Window
     private record OtpResultPayload(bool Sukses, string? Pesan);
 
     private record CreatePasswordResultPayload(bool Sukses, string? Pesan);
+
+    private record PowerResultPayload(bool Sukses, string? Pesan);
 }

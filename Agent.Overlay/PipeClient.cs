@@ -179,6 +179,21 @@ public class PipeClient : IDisposable
         await SendAsync(new PipeMessage(PipeMessageType.CreatePasswordRequest, payload), ct);
     }
 
+    /// <summary>
+    /// Minta service me-restart atau mematikan PC ini.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ Harus lewat service, BUKAN `Process.Start("shutdown")` dari overlay.
+    /// Overlay berjalan sebagai user biasa tanpa hak admin, jadi `shutdown`
+    /// dari sana berakhir "Access is denied". Service berjalan sebagai
+    /// LocalSystem sehingga perintah itu sah.
+    /// </remarks>
+    public async Task SendPowerRequestAsync(PowerAksi aksi, CancellationToken ct = default)
+    {
+        var payload = JsonConvert.SerializeObject(new { aksi = aksi.ToString() });
+        await SendAsync(new PipeMessage(PipeMessageType.PowerRequest, payload), ct);
+    }
+
     public void Dispose()
     {
         _cts?.Cancel();
@@ -200,12 +215,24 @@ public enum PipeMessageType
     ServerLink = 7,
     OtpResult = 8,
     CreatePasswordResult = 9,
+    PowerResult = 10,
     LoginRequest = 100,
     PinVerifyRequest = 101,
     StateRequest = 102,
     StopSessionRequest = 103,
     OtpRequest = 104,
-    CreatePasswordRequest = 105
+    CreatePasswordRequest = 105,
+    PowerRequest = 106
 }
 
 public record PipeMessage(PipeMessageType Type, string Payload);
+
+/// <summary>Aksi menyalakan ulang / mematikan PC yang diminta dari layar login.</summary>
+public enum PowerAksi
+{
+    /// <summary>Restart PC.</summary>
+    Restart,
+
+    /// <summary>Matikan PC.</summary>
+    Matikan
+}

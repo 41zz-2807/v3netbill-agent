@@ -28,6 +28,7 @@ internal enum PipeMessageType
     ServerLink = 7,         // Status koneksi ke server berubah (terhubung/terputus)
     OtpResult = 8,          // Hasil permintaan OTP (berhasil/gagal + pesan)
     CreatePasswordResult = 9, // Hasil permintaan buat/ganti password
+    PowerResult = 10,        // Hasil permintaan restart/mematikan PC
 
     // Overlay → Service
     LoginRequest = 100,     // Login request (kode, password)
@@ -35,7 +36,8 @@ internal enum PipeMessageType
     StateRequest = 102,     // Overlay minta state terkini (setelah reconnect)
     StopSessionRequest = 103, // Overlay minta hentikan sesi yang berjalan (stop sendiri)
     OtpRequest = 104,       // Overlay minta kirim OTP ke Telegram
-    CreatePasswordRequest = 105 // Overlay minta dibuatkan password baru untuk sebuah kode
+    CreatePasswordRequest = 105, // Overlay minta dibuatkan password baru untuk sebuah kode
+    PowerRequest = 106      // Overlay minta restart / matikan PC ini
 }
 
 internal record PipeMessage(PipeMessageType Type, string Payload);
@@ -711,6 +713,92 @@ public class Worker : BackgroundService
                     }
                     break;
                 }
+            case PipeMessageType.PowerRequest:
+                await TanganiPowerRequestAsync(msg.Payload, ct);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Jalankan perintah restart / matikan PC atas permintaan layar login.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ Perintah HARUS dieksekusi dari service. Overlay jalan sebagai user biasa
+    /// tanpa hak admin sehingga `shutdown` dari sana berakhir "Access is denied";
+    /// service jalan sebagai LocalSystem sehingga perintah itu sah.
+    ///
+    /// ⚠️ Ditolak kalau masih ada sesi pelanggan yang berjalan. Restart mendadak
+    /// akan memutus sesi tanpa membalikkan sisa waktu ke voucher, jadi kasir harus
+    /// menghentikan sesi lewat tombol stop dulu — sama seperti aturan auto-matikan
+    /// PC idle yang juga melewati PC yang sedang dipakai.
+    /// </remarks>
+    private async Task TanganiPowerRequestAsync(string payload, CancellationToken ct)
+    {
+        string aksi = "tidak-dikenal";
+        bool restart = false;
+        bool matikan = false;
+
+        try
+        {
+            var hasil = JsonConvert.DeserializeObject<PowerRequestPayload>(payload);
+            aksi = hasil?.Aksi?.Trim() ?? "";
+            // ⚠️ Bandingkan dengan literal, bukan nameof(PowerAksi.X): enum itu
+            // tinggal di project Overlay yang tidak dirujuk Service, jadi
+            // nameof-nya tidak akan terkompilasi di sini.
+            restart = string.Equals(aksi, "Restart", StringComparison.OrdinalIgnoreCase);
+            matikan = string.Equals(aksi, "Matikan", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex)
+        {
+            AgentLog.Write(ex, "Payload PowerRequest tidak bisa dibaca");
+        }
+
+        if (!restart && !matikan)
+        {
+            AgentLog.Write($"PowerRequest ditolak — aksi tidak dikenal: \"{aksi}\"");
+            await SendToOverlayAsync(new PipeMessage(PipeMessageType.PowerResult, JsonConvert.SerializeObject(new
+            {
+                sukses = false,
+                pesan = "Aksi tidak dikenal.",
+            })));
+            return;
+        }
+
+        if (_currentState.SisaDetik > 0)
+        {
+            AgentLog.Write($"PowerRequest ({aksi}) DITOLAK — masih ada sesi berjalan, sisa {_currentState.SisaDetik} detik");
+            await SendToOverlayAsync(new PipeMessage(PipeMessageType.PowerResult, JsonConvert.SerializeObject(new
+            {
+                sukses = false,
+                pesan = "Masih ada pelanggan yang memakai PC ini. Hentikan sesi dulu.",
+            })));
+            return;
+        }
+
+        // 10 detik supaya operator sempat melepas tangan dari keyboard dan
+        // MiddleMouse menghasilkan dialog "you're about to be signed out".
+        var argumen = restart
+            ? "/r /f /t 10 /c \"v3netbill: PC direstart dari layar login\""
+            : "/s /f /t 10 /c \"v3netbill: PC dimatikan dari layar login\"";
+
+        try
+        {
+            Process.Start(new ProcessStartInfo("shutdown", argumen) { UseShellExecute = false });
+            AgentLog.Write($"{aksi} dijadwalkan 10 detik (force) dari layar login");
+            await SendToOverlayAsync(new PipeMessage(PipeMessageType.PowerResult, JsonConvert.SerializeObject(new
+            {
+                sukses = true,
+                pesan = restart ? "PC akan restart dalam 10 detik." : "PC akan mati dalam 10 detik.",
+            })));
+        }
+        catch (Exception ex)
+        {
+            AgentLog.Write(ex, $"Gagal menjalankan perintah {aksi}");
+            await SendToOverlayAsync(new PipeMessage(PipeMessageType.PowerResult, JsonConvert.SerializeObject(new
+            {
+                sukses = false,
+                pesan = "Gagal menjalankan perintah. PC harus direstart manual.",
+            })));
         }
     }
 
@@ -1095,4 +1183,5 @@ public class Worker : BackgroundService
     private record CreatePasswordPayload(string Kode, string PasswordLama, string Password);
     private record PinVerifyRequestPayload(string Pin);
     private record PinVerifyResponse(bool Sukses);
+    private record PowerRequestPayload(string Aksi);
 }

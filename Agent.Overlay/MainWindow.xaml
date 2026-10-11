@@ -562,5 +562,82 @@
             </Button.Template>
         </Button>
 
+        <!-- Restart / matikan PC — pojok kanan bawah, hanya saat layar login.
+
+             ⚠️ Tombol ini menjalankan aksi yang TIDAK bisa dibatalkan dengan
+             mudah (PC mati mendadak), jadi keduanya Style-nya memakai warna
+             IsMouseOver yanggelap — operator harus melihat tombol berubah
+             warna sebelum menekan. Warna itu satu-satunya petunjuk; teks di
+             dalam tombol sengaja tidak diubah saat hover supaya posisi label
+             tidak ikut bergeser.
+
+             ⚠️ Ikon memakai Segoe MDL2 Assets (huruf privat-area U+E7E8
+             "Power" dan U+E72C "Refresh"). Font itu bawaan Windows 10/11.
+             Kalau sistemnya tidak punya, ikon hilang tapi tombolnya tetap
+             berfungsi karena setiap tombol punya ToolTip. -->
+        <StackPanel x:Name="PowerButtons"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                    Margin="0,0,24,24">
+
+            <Button x:Name="RestartButton"
+                    Width="56" Height="56" Margin="0,0,12,0"
+                    Cursor="Hand"
+                    ToolTip="Restart PC ini"
+                    Click="RestartButton_Click">
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Lingkar" CornerRadius="28"
+                                Background="#F59E0B">
+                            <Border.Effect>
+                                <DropShadowEffect BlurRadius="12" ShadowDepth="2" Opacity="0.25" Color="#0F172A"/>
+                            </Border.Effect>
+                            <TextBlock Text="&#xE72C;" FontFamily="Segoe MDL2 Assets"
+                                       FontSize="22" Foreground="White"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Lingkar" Property="Background" Value="#B45309"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Lingkar" Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Button.Template>
+            </Button>
+
+            <Button x:Name="ShutdownButton"
+                    Width="56" Height="56"
+                    Cursor="Hand"
+                    ToolTip="Matikan PC ini"
+                    Click="ShutdownButton_Click">
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Lingkar" CornerRadius="28"
+                                Background="#DC2626">
+                            <Border.Effect>
+                                <DropShadowEffect BlurRadius="12" ShadowDepth="2" Opacity="0.25" Color="#0F172A"/>
+                            </Border.Effect>
+                            <TextBlock Text="&#xE7E8;" FontFamily="Segoe MDL2 Assets"
+                                       FontSize="22" Foreground="White"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Lingkar" Property="Background" Value="#991B1B"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Lingkar" Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Button.Template>
+            </Button>
+        </StackPanel>
+
     </Grid>
 </Window>
