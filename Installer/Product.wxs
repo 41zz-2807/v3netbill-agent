@@ -20,7 +20,11 @@
        ============================================================ -->
 
   <!-- ================= VERSION =================
-       ⚠️ WAJIB dinaikkan setiap ada perubahan agent. Angka ini satu-satunya
+   ⚠️ Default SERVER_URL jika tidak lewat -d build: http://192.168.1.71:3000
+   !ifndef SERVER_URL
+   !define SERVER_URL "http://192.168.1.71:3000"
+   !endif
+        ⚠️ WAJIB dinaikkan setiap ada perubahan agent. Angka ini satu-satunya
           pembeda antara MSI lama dan MSI baru, dan sekarang juga ditulis ke
           registry sebagai "AgentVersion" supaya bisa dicek langsung di PC:
 
