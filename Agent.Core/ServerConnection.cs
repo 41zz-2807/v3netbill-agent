@@ -399,10 +399,16 @@ public sealed class ServerConnection : IAsyncDisposable
         _registered = true;
         try
         {
+            // Dibaca sekali lalu dipakai dua kali — registry dibaca dua kali
+            // tidak embarked ke mana-mana dan bisa menghasilkan dua nilai
+            // berbeda kalau ada proses lain yang menulis di antara keduanya.
+            string? versi = FlagPaths.BacaVersiAgent();
             await client.EmitAsync("agent:register",
-                [ new { pcId = _pcId, agentToken = _agentToken } ], ct);
+                [ new { pcId = _pcId, agentToken = _agentToken, versiAgent = versi } ], ct);
             _aktivitasSuksesUtc = DateTime.UtcNow;
-            _logger.LogInformation("agent:register terkirim untuk PC {PcId}", _pcId);
+            _logger.LogInformation(
+                "agent:register terkirim untuk PC {PcId} (versi {Versi})",
+                _pcId, versi ?? "tidak diketahui");
         }
         catch
         {

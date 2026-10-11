@@ -50,6 +50,12 @@ public static class FlagPaths
     public const string MaintenanceSinceValue = "MaintenanceSince";
     public const string MaintenanceReasonValue = "MaintenanceReason";
 
+    /// <summary>
+    /// Nama nilai versi agent di registry. Ditulis MSI dari <c>Product/@Version</c>,
+    /// jadi isinya sama persis dengan angka yang tertera di "Program and Features".
+    /// </summary>
+    public const string AgentVersionValue = "AgentVersion";
+
     private static string PublicFolder
     {
         get
@@ -114,6 +120,42 @@ public static class FlagPaths
         }
         catch
         {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Versi agent yang terpasang, dibaca dari registry.
+    /// </summary>
+    /// <remarks>
+    /// Nilai ini ditulis MSI dari <c>Product/@Version</c>, jadi sama persis dengan
+    /// yang tampil di "Program and Features" Windows. Itu yang dipakai server untuk
+    /// memutuskan apakah PC perlu diperbarui.
+    ///
+    /// <para>
+    /// ⚠️ Kalau registry tidak terbaca atau kosong, hasilnya <c>null</c> — BUKAN
+    /// nomor versi tebakan. Server membaca <c>null</c> sebagai "tidak diketahui",
+    /// bukan "terlama"; Installing lewat cara lain dari MSI ini (mis. salin manual)
+    /// memang tidak menulis nilai, jadi menebak akan menghasilkan nomor yang salah
+    /// dan membuat server menganggap PC selalu perlu update.
+    /// </para>
+    /// </remarks>
+    public static string? BacaVersiAgent()
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(RegistryKey);
+            var nilai = key?.GetValue(AgentVersionValue) as string;
+            if (string.IsNullOrWhiteSpace(nilai)) return null;
+            nilai = nilai.Trim();
+            // Batas 32 karakter sama dengan sisi server. Nilai registry bisa saja
+            // berisi spasi atau baris baru kalau pernah diubah manual lewat regedit;
+            // nilai yang lebih panjang dari itu tidak mungkin versi MSI.
+            return nilai.Length > 32 ? nilai[..32] : nilai;
+        }
+        catch (Exception ex)
+        {
+            AgentLog.Write($"Versi agent tidak terbaca dari registry: {ex.Message}");
             return null;
         }
     }
