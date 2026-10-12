@@ -197,6 +197,16 @@ jobs:
         shell: pwsh
         run: |
           $ws = "${{ github.workspace }}"
+          # ⚠️ Banner dialog installer memakai BINDER variable (-b), bukan -d.
+          # Di WiX v4 WixUIBannerBmp dibaca lewat binder, dan nilainya harus
+          # DIREKTORI yang berisi Banner.bmp — kalau diberi berkas langsung, wix
+          # menolak dengan WIX0280. Cara lama WiX v3 (elemen <WixVariable>)
+          # sudah tidak didukung dan ditolak WIX0005 di semua posisi.
+          #
+          # ⚠️ Komentar ini WAJIB di LUAR perintah berkutuk-backtick. Baris
+          # komentar di tengah rangkaian backtick akan commenting-out seluruh
+          # sisa baris logis, termasuk semua argumen setelahnya — bukan hanya
+          # baris berikutnya.
           wix build `
             "$ws/Installer/Product.wxs" `
             "$ws/Installer/SvcDepFiles.wxs" `
@@ -209,6 +219,7 @@ jobs:
             -d licenseRtf="$ws/Installer/license.rtf" `
             -d RustDeskInstaller="$ws/Installer/RustDesk/rustdesk-$env:RUSTDESK_VERSION-x86_64.exe" `
             -d SERVER_URL="${{ env.SERVER_URL }}" `
+            -b WixUIBannerBmp="$ws/Installer/Bitmaps" `
             -ext WixToolset.UI.wixext `
             -o "$ws/artifacts/${{ env.MSI_OUT }}"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

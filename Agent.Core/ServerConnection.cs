@@ -75,6 +75,13 @@ public sealed class ServerConnection : IAsyncDisposable
     private DateTime _lastWarnNotConnected = DateTime.MinValue;
     private int _heartbeatTickCount;
     private bool _registered;
+
+    /// <summary>
+    /// ID RustDesk hasil pembacaan pertama yang berhasil. Di-cache supaya
+    /// `--get-id` (yang menjalankan proses lain) tidak dipanggil ulang pada
+    /// setiap reconnect.
+    /// </summary>
+    private string? _rustdeskIdCached;
     private bool _disposed;
 
     /// <summary>Bukti terakhir socket ini benar-benar hidup (UTC).</summary>
@@ -403,12 +410,31 @@ public sealed class ServerConnection : IAsyncDisposable
             // tidak embarked ke mana-mana dan bisa menghasilkan dua nilai
             // berbeda kalau ada proses lain yang menulis di antara keduanya.
             string? versi = FlagPaths.BacaVersiAgent();
+
+            // ⚠️ ID RustDesk TIDAK diambil setiap register. `--get-id` menjalankan
+            // proses lain, dan register bisa terjadi berkali-kali (reconnect).
+            // Mengambilnya tiap kali menambah beban dan menunda koneksi. Nilai
+            // di-cache; diambil ulang HANYA kalau masih kosong — jadi PC yang
+            // RustDesk-nya belum selesai|first run tetap akan osmotic
+            // mencoba lagi pada register berikutnya, tanpa pernah memanggil
+            // prosesnya dua kali kalau ID-nya sudah ada.
+            string? rustdesk = _rustdeskIdCached;
+            if (string.IsNullOrEmpty(rustdesk))
+            {
+                rustdesk = RustdeskId.Ambil();
+                if (!string.IsNullOrEmpty(rustdesk))
+                {
+                    _rustdeskIdCached = rustdesk;
+                    AgentLog.Write($"RustDesk ID terbaca: {rustdesk}");
+                }
+            }
+
             await client.EmitAsync("agent:register",
-                [ new { pcId = _pcId, agentToken = _agentToken, versiAgent = versi } ], ct);
+                [ new { pcId = _pcId, agentToken = _agentToken, versiAgent = versi, rustdeskId = rustdesk } ], ct);
             _aktivitasSuksesUtc = DateTime.UtcNow;
             _logger.LogInformation(
-                "agent:register terkirim untuk PC {PcId} (versi {Versi})",
-                _pcId, versi ?? "tidak diketahui");
+                "agent:register terkirim untuk PC {PcId} (versi {Versi}, rustdesk {Rustdesk})",
+                _pcId, versi ?? "tidak diketahui", rustdesk ?? "belum ada");
         }
         catch
         {

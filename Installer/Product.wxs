@@ -42,7 +42,7 @@
        ============================================= -->
   <Package UpgradeCode="7f3a9b1e-5c2d-4a8f-9e1b-3d6c8f4a2b7e"
            Name="v3Netbill Agent"
-           Version="1.0.20.0"
+           Version="1.0.21.0"
            Manufacturer="v3Netbill"
            Language="1033"
            Codepage="65001"
@@ -103,6 +103,27 @@
     <Property Id="AGENT_TOKEN" Secure="yes">
       <RegistrySearch Id="PrefillAgentToken" Root="HKLM" Key="Software\v3Netbill\Agent" Name="AgentToken" Type="raw" />
     </Property>
+
+    <!-- ===== RustDesk: password takawasi =====
+
+         Password ini hanya dipakai untuk MASUK ke PC ini lewat RustDesk saat
+         repair. Sengaja TIDAK dikirim ke backend dan tidak disimpan di
+         database — kalau database bocor, yang ikut bocor adalah akses remote
+         ke mesin yang sedang dipakai pelanggan, bukan sekadar data billing.
+
+         Secure="yes" supaya nilainya tidak ikut tercetak di log MSI verbos.
+
+         ⚠️ Kosong itu SAH. Field dibiarkan kosong berarti RustDesk tetap
+         terpasang tanpa password tetap, dan hanya custom action pemanggilnya
+         yang dilewati. Itu pilihan operator, bukan kegagalan. -->
+    <Property Id="RUSTDESK_PASSWORD" Secure="yes" />
+
+    <!-- Lokasi executable RustDesk setelah instalasi. Folder RustDesk TIDAK
+         dideklarasikan sebagai Directory milik MSI: folder itu dibuat oleh
+         installer RustDesk sendiri, bukan oleh kita. Kalau dideklarasikan +
+         CreateFolder, MSI akan ikut Jeonghapus folder itu saat uninstall
+         walau RustDesk masih terpasang. -->
+    <Property Id="RUSTDESK_EXE" Value="[ProgramFiles64Folder]RustDesk\RustDesk.exe" />
 
     <!-- ===== Uninstall protection: PIN admin (diverifikasi backend) memakai
          custom action Type 18 (Agent.Overlay.exe uninstall-guard) sebelum
@@ -352,6 +373,32 @@
                   Impersonate="no"
                   Return="ignore" />
 
+    <!-- ===== Terapkan password takawasi ke RustDesk =====
+
+         Terpisah dari InstallRustDeskAction karena harus jalan SESUDAH installer
+         RustDesk selesai. Kalau disatukan dalam satu perintah, password-nya
+         dikirim ke exe yang belum selesai memasang RustDesk dan tidak ada yang
+         menerimanya.
+
+         SetProperty (bukan ExeCommand) karena targetnya file yang DILEWATI MSI
+         di luar InstallFiles — RustDesk.exe tidak pernah ada di dalam paket
+         MSI, jadi tidak bisa ditulis sebagai FileRef.
+
+         -wait WAJIB, sama seperti di InstallRustDeskAction: tanpa itu proses
+         melepas diri sebelum selesai menulis password ke config RustDesk.
+
+         Condition memeriksa RUSTDESK_PASSWORD <> "" — operator boleh
+         meninggalkannya kosong, dan instalasi tetap harus berhasil. -->
+    <SetProperty Id="SetRustdeskPasswordAction"
+                 Value="&quot;[RUSTDESK_EXE]&quot; --password &quot;[RUSTDESK_PASSWORD]&quot; -wait"
+                 Before="SetRustdeskPasswordAction" Sequence="execute" />
+    <CustomAction Id="SetRustdeskPasswordAction"
+                  BinaryRef="WixCA"
+                  DllEntry="WixQuietExec64"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
     <InstallExecuteSequence>
       <Custom Action="UninstallGuardAction" Before="RemoveFiles"
               Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND NOT V3PINVERIFIED" />
@@ -362,6 +409,10 @@
            install. NOT REMOVE: uninstall TIDAK boleh memasang RustDesk. -->
       <Custom Action="InstallRustDeskAction" After="InstallFiles"
               Condition="NOT REMOVE" />
+      <!-- Setelah InstallRustDeskAction, bukan sekadar InstallFiles: RustDesk
+           harus sudah terpasang sebelum password-nya bisa ditulis. -->
+      <Custom Action="SetRustdeskPasswordAction" After="InstallRustDeskAction"
+              Condition="NOT REMOVE AND RUSTDESK_PASSWORD&lt;&gt;&quot;&quot;" />
     </InstallExecuteSequence>
 
     <!-- ===== Shortcuts (start menu): shortcut "Uninstall v3Netbill Agent" di
@@ -372,10 +423,13 @@
     <!-- Fragment 1: definisi dialog konfigurasi server -->
     <Fragment>
       <UI>
-        <Dialog Id="ServerConfigDialog" Width="370" Height="320" Title="v3Netbill Agent - Konfigurasi Server">
+        <!-- ⚠️ Tinggi dialog 320 -> 370 karena field password RustDesk ditambahkan.
+             Tinggi banner tetap 44: BannerBitmap diskalakan dari 493x58 oleh MSI,
+             jadi ukuran aslinya tidak boleh ikut diubah. -->
+        <Dialog Id="ServerConfigDialog" Width="370" Height="370" Title="v3Netbill Agent - Konfigurasi Server">
           <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="WixUI_Bmp_Banner" />
           <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
-          <Control Id="BottomLine" Type="Line" X="0" Y="276" Width="370" Height="0" />
+          <Control Id="BottomLine" Type="Line" X="0" Y="326" Width="370" Height="0" />
           <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes">
             <Text Value="Konfigurasi Server" />
           </Control>
@@ -383,20 +437,29 @@
             <Text Value="Isi alamat server billing, ID PC, dan Token agent dari dashboard." />
           </Control>
 
-          <Control Id="ServerUrlLabel" Type="Text" X="15" Y="80" Width="100" Height="14" Transparent="yes" NoPrefix="yes">
+          <Control Id="ServerUrlLabel" Type="Text" X="15" Y="78" Width="100" Height="14" Transparent="yes" NoPrefix="yes">
             <Text Value="Server URL:" />
           </Control>
-          <Control Id="ServerUrlEdit" Type="Edit" X="15" Y="100" Width="340" Height="21" Property="SERVER_URL" />
+          <Control Id="ServerUrlEdit" Type="Edit" X="15" Y="97" Width="340" Height="21" Property="SERVER_URL" />
 
-          <Control Id="PcIdLabel" Type="Text" X="15" Y="130" Width="100" Height="14" Transparent="yes" NoPrefix="yes">
+          <Control Id="PcIdLabel" Type="Text" X="15" Y="124" Width="100" Height="14" Transparent="yes" NoPrefix="yes">
             <Text Value="PC ID:" />
           </Control>
-          <Control Id="PcIdEdit" Type="Edit" X="15" Y="150" Width="340" Height="21" Property="PC_ID" />
+          <Control Id="PcIdEdit" Type="Edit" X="15" Y="143" Width="340" Height="21" Property="PC_ID" />
 
-          <Control Id="TokenLabel" Type="Text" X="15" Y="180" Width="100" Height="14" Transparent="yes" NoPrefix="yes">
+          <Control Id="TokenLabel" Type="Text" X="15" Y="170" Width="100" Height="14" Transparent="yes" NoPrefix="yes">
             <Text Value="Agent Token:" />
           </Control>
-          <Control Id="TokenEdit" Type="Edit" X="15" Y="200" Width="340" Height="21" Property="AGENT_TOKEN" Password="yes" />
+          <Control Id="TokenEdit" Type="Edit" X="15" Y="189" Width="340" Height="21" Property="AGENT_TOKEN" Password="yes" />
+
+          <!-- Password RustDesk. SENGaja BOLEH dikosongkan: instalasi agent
+               tidak boleh gagal hanya karena remote repair tidak diberi
+               password. Kalau kosong, RustDesk tetap terpasang tanpa password
+               dan custom action pemanggilnya dilewati. -->
+          <Control Id="RustdeskPasswordLabel" Type="Text" X="15" Y="220" Width="340" Height="14" Transparent="yes" NoPrefix="yes">
+            <Text Value="Password RustDesk (remote repair, boleh dikosongkan):" />
+          </Control>
+          <Control Id="RustdeskPasswordEdit" Type="Edit" X="15" Y="239" Width="340" Height="21" Property="RUSTDESK_PASSWORD" Password="yes" />
 
           <!-- Mode maintenance berarti PC TERBUKA tanpa penagihan. Kalau tertinggal,
                siapa pun yang lewat bisa memakai PC itu gratis dan tidak ada satu pun
@@ -407,13 +470,13 @@
                Default TIDAK dicentang, jadi property KEEPMAINT kosong = "akhiri".
                Dicentang = JAGA. -->
           <Control Id="KeepMaintenanceCheckBox" Type="CheckBox"
-                    X="15" Y="236" Width="340" Height="17"
+                    X="15" Y="276" Width="340" Height="17"
                     Property="KEEPMAINT" CheckBoxValue="1"
                     Text="Jaga mode maintenance (PC tetap terbuka - untuk sedang memperbaiki)" />
 
-          <Control Id="Back" Type="PushButton" X="180" Y="285" Width="56" Height="17" Text="!(loc.WixUIBack)" />
-          <Control Id="Next" Type="PushButton" X="236" Y="285" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)" />
-          <Control Id="Cancel" Type="PushButton" X="304" Y="285" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Control Id="Back" Type="PushButton" X="180" Y="335" Width="56" Height="17" Text="!(loc.WixUIBack)" />
+          <Control Id="Next" Type="PushButton" X="236" Y="335" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)" />
+          <Control Id="Cancel" Type="PushButton" X="304" Y="335" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
             <Publish Event="SpawnDialog" Value="CancelDlg" />
           </Control>
         </Dialog>
