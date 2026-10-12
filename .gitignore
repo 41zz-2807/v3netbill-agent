@@ -220,3 +220,6 @@ Installer/*DepFiles.wxs
 *.wixobj
 *.wixpdb
 *.wixir
+
+# RustDesk installer (24 MB binary, di-download CI — jangan commit)
+Installer/RustDesk/

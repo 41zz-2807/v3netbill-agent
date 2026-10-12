@@ -15,6 +15,21 @@ env:
   WIX_VERSION: '4.0.5'
   MSI_OUT: 'v3NetbillAgentSetup.msi'
 
+  # RustDesk untuk remote repair. Installer EXE-nya ikut THEREpack ke MSI,
+  # lalu dijalankan senyap oleh custom action.
+  #
+  # ⚠️ Binari 24 MB TIDAK bisa di-commit (repo public + repo jadi besar),
+  # jadi `.gitignore` menyingkirkan `Installer/RustDesk/`. Konsekuensinya CI
+  # HARUS mengunduhnya sendiri — tanpa langkah ini, folder itu kosong di
+  # runner dan `wix build` gagal dengan WIX0103 (sumber file tidak ketemu).
+  #
+  # SHA256 DIPIN, bukan diambil dari checksum yang diunduh bersama: kalau
+  # checksummya ikut dari URL yang sama, verifikasi jadi tidak berarti
+  # apa-apa. Nilai di bawah sudah dicocokkan dengan rilis resmi
+  # rustdesk/rustdesk 1.4.9. Mengganti versi berarti mengganti KEDUA nilai.
+  RUSTDESK_VERSION: '1.4.9'
+  RUSTDESK_SHA256: 'eaedeb0088e687bf46f7c46a9c6ea5493ce51f3134dfd6acbedb47b5b9136274'
+
   # Base URL server untuk agent. Dipakai sebagai default kolom "Server URL"
   # di dialog installer, jadi MSI yang terpasang sudah benar sejak awal —
   # tidak perlu kasir mengetik ulang.
@@ -146,6 +161,37 @@ jobs:
             -Cg "OverlayDepComponents" `
             -Out "$ws/Installer/OverlayDepFiles.wxs"
 
+      # ----- Unduh RustDesk (binari, bukan teks — lihat catatan RUSTDESK_* di env) -----
+      - name: Unduh RustDesk installer
+        shell: pwsh
+        run: |
+          $dir = "${{ github.workspace }}/Installer/RustDesk"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $nama = "rustdesk-$env:RUSTDESK_VERSION-x86_64.exe"
+          $out = Join-Path $dir $nama
+          # URL dibangun dari versi, jadi naikkan versinya cukup di satu tempat.
+          $url = "https://github.com/rustdesk/rustdesk/releases/download/$env:RUSTDESK_VERSION/$nama"
+
+          Write-Host "Mengunduh $url"
+          curl.exe -sL --retry 5 --retry-all-errors --max-time 900 -o $out $url
+          if (-not (Test-Path $out)) { Write-Error "RustDesk gagal diunduh"; exit 1 }
+
+          $sha = (Get-FileHash -Algorithm SHA256 -LiteralPath $out).Hash.ToLowerInvariant()
+          Write-Host "sha256: $sha  (harapan: $env:RUSTDESK_SHA256)"
+          if ($sha -ne $env:RUSTDESK_SHA256) {
+            Write-Error "SHA256 RustDesk tidak cocok. Jangan asal pakai — file ini dijalankan sebagai SYSTEM saat instalasi."
+            exit 1
+          }
+
+          # NSIS, bukan file biasa: harus PE (MZ). M_Z check catching
+          # halaman error GitHub yang tersimpan sebagai .exe.
+          $head = [System.IO.File]::ReadAllBytes($out)[0..1]
+          if (-not ($head[0] -eq 0x4D -and $head[1] -eq 0x5A)) {
+            Write-Error "Berkas RustDesk bukan PE executable (MZ). Kemungkinan halaman error tersimpan."
+            exit 1
+          }
+          Write-Host "RustDesk $env:RUSTDESK_VERSION siap ($((Get-Item $out).Length) byte)."
+
       # ----- Build MSI (wix build) -----
       - name: Build MSI
         shell: pwsh
@@ -161,6 +207,7 @@ jobs:
             -d OverlayPublishDir="$ws/artifacts/Agent.Overlay.Special\" `
             -d OverlayDepDir="$ws/artifacts/Agent.Overlay\" `
             -d licenseRtf="$ws/Installer/license.rtf" `
+            -d RustDeskInstaller="$ws/Installer/RustDesk/rustdesk-$env:RUSTDESK_VERSION-x86_64.exe" `
             -d SERVER_URL="${{ env.SERVER_URL }}" `
             -ext WixToolset.UI.wixext `
             -o "$ws/artifacts/${{ env.MSI_OUT }}"
@@ -193,6 +240,18 @@ jobs:
           if (-not $servExe) { Write-Error "Missing Agent.Service.exe di MSI"; exit 1 }
           if (-not $ovlExe) { Write-Error "Missing Agent.Overlay.exe di MSI"; exit 1 }
           if ($cfg.Count -lt 2) { Write-Error "appsettings.json < 2 di MSI"; exit 1 }
+          # ⚠️ Kehadiran RustDesk di MSI HARUS dicek di sini. Build yang
+          # sukses tidak menjamin apa pun: kalau langkah unduhnya dilewati
+          # atau digest-nya tidak cocok, `wix build` berhenti duluan, tapi
+          # kalau nanti ada langkah lain yang membuat foldernya kosong tanpa
+          # menggagalkan build, MSI tetap terbit TANPA RustDesk — dan gejalanya
+          # baru muncul saat kasir memasang di PC dan tidak menemukan RustDesk.
+          $rustdesk = $files | Where-Object { $_ -like '*rustdesk-*-x86_64.exe' }
+          if (-not $rustdesk) {
+            Write-Error "RustDesk installer tidak ada di dalam MSI. Remote repair akan mati di semua PC."
+            exit 1
+          }
+          Write-Host ("RustDesk di MSI: " + ($rustdesk -join ', '))
           $files | Sort-Object | ForEach-Object { Write-Host "   $_" }
 
           # --- ServerUrl HARUS benar, bukan sekadar file-nya ada ---
@@ -207,10 +266,10 @@ jobs:
           $actual = ""
           if ($recP = $viewP.Fetch()) { $actual = "$($recP.StringData(1))" }
           $viewP.Close()
-          # --- Product/@Version WAJIB dinaikkan ---
+          # --- Product/@Version WAJIB lebih baru dari yang terpasang ---
           # MSI ini dibuild ulang berkali-kali tanpa menaikkan versi, jadi
-          # semuanya tercatat "1.0.9.0" dan mustahil diketahui mana yang
-          # benar-benar terpasang di PC. Step ini gagal kalau masih basi.
+          # semuanya tercatat sebagai angka yang sama dan mustahil diketahui
+          # mana yang benar-benar terpasang di PC.
           # ⚠️ Nama property-nya ProductVersion, BUKAN Version. Versi
           # kali dicoba dengan 'Version' dan hasilnya kosong — check-nya jadi
           # tidak pernah gagal sama sekali, persis jenis bug yang seharusnya
@@ -225,9 +284,55 @@ jobs:
             Write-Error "ProductVersion tidak terbaca dari MSI. Check ini tidak berguna bila kosong."
             exit 1
           }
-          if ($versi -eq '1.0.9.0') {
-            Write-Error "Product/@Version masih 1.0.9.0. Naikkan di Installer/Product.wxs."
-            exit 1
+
+          # ⚠️ Dulu check ini `if ($versi -eq '1.0.9.0')` — konstanta basi.
+          # Yang terjadi nyata: versi naik terus sampai 1.0.19.0, lalu
+          # berhenti. MSI berikutnya yang isinya BERUBAH tetap lolos karena
+          # 1.0.19.0 bukan 1.0.9.0. Gejalanya di server nyata: tanggal upload
+          # berubah, size & sha256 ikut berubah, tapi ProductVersion di
+          # Pengaturan tetap 1.0.19.0 — jadi mustahil membuktikan MSI yang
+          # terpasang benar-benar yang terbaru.
+          # Sekarang pembandingnya adalah versi yang SEDANG terpasang di
+          # backend, jadi angka yang sama persis akan menggagalkan build.
+          $bUrl  = "${{ secrets.V3NETBILL_BACKEND_URL }}"
+          $bUser = "${{ secrets.V3NETBILL_ADMIN_USER }}"
+          $bPass = "${{ secrets.V3NETBILL_ADMIN_PASSWORD }}"
+          if ([string]::IsNullOrWhiteSpace($bUrl) -or
+              [string]::IsNullOrWhiteSpace($bUser) -or
+              [string]::IsNullOrWhiteSpace($bPass)) {
+            # Jangan diam-diam lolos. Guard ini butuh backend, dan tanpa
+            # kredensial dia tidak menjalankan apa pun — greenscreen di sini
+            # berarti "tidak diperiksa", bukan "berhasil diperiksa".
+            Write-Warning "GUARD VERSI MATI: secret V3NETBILL_BACKEND_URL / V3NETBILL_ADMIN_USER / V3NETBILL_ADMIN_PASSWORD belum diisi, jadi versi MSI TIDAK dibandingkan dengan server."
+            Write-Warning "Isi ketiganya di repo Settings > Secrets, lalu build ulang.(product/@Version di Installer/Product.wxs tetap wajib dinaikkan manual.)"
+          } else {
+            try {
+              $login = Invoke-RestMethod -Method Post -Uri "$bUrl/api/auth/login" `
+                -ContentType 'application/json' -TimeoutSec 60 `
+                -Body (@{ username = $bUser; password = $bPass } | ConvertTo-Json)
+              $jwt = $login.access_token
+              if ([string]::IsNullOrWhiteSpace($jwt)) { throw "login backend tidak mengembalikan access_token" }
+
+              $info = Invoke-RestMethod -Method Get -Uri "$bUrl/api/settings/installer/info" `
+                -Headers @{ Authorization = "Bearer $jwt" } -TimeoutSec 60
+
+              $terpasang = "$($info.versionName)"
+              Write-Host "ProductVersion di server: '$terpasang' (sha256 $($info.sha256))"
+
+              if ([string]::IsNullOrWhiteSpace($terpasang)) {
+                Write-Host "Server belum punya MSI — tidak ada yang perlu dibandingkan."
+              } elseif ([version]$versi -le [version]$terpasang) {
+                # Format ProductVersion persis format [version] .NET
+                # (major.minor.build.revision), jadi bisa dibandingkan langsung.
+                Write-Error "Product/@Version ($versi) bukan lebih baru dari yang terpasang di server ($terpasang). Naikkan di Installer/Product.wxs."
+                exit 1
+              } else {
+                Write-Host "Versi MSI ($versi) lebih baru dari server ($terpasang). Lanjut."
+              }
+            } catch {
+              Write-Error "Tidak bisa membandingkan versi dengan server: $($_.Exception.Message)"
+              exit 1
+            }
           }
 
           Write-Host "SERVER_URL di MSI: '$actual' (harapan: '$expected')"

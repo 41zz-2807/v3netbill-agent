@@ -33,15 +33,16 @@
           Kenapa penting: MSI ini dibuild ulang berkali-kali tanpa menaikkan
           versi, jadi semuanya tercatat sebagai "1.0.9.0" dan mustahil
           diketahui mana yang terpasang. Step "Verify MSI contents" di
-          build-agent.yml sekarang GAGAL kalau versi ini masih 1.0.9.0 —
-          jadi lupa menaikkan tidak bisa lolos ke artifact.
+          build-agent.yml sekarang membandingkan versi MSI dengan versi yang
+          SEDANG terpasang di backend — jadi lebih baru wajib, dan angka yang
+          sama persis akan menggagalkan build.
 
           Format MSI: major.minor.build.revision, tiap bagian 0-255, dan
           build dibandingkan SEBELUM revision. 1.0.10.0 > 1.0.9.0 ✓
        ============================================= -->
   <Package UpgradeCode="7f3a9b1e-5c2d-4a8f-9e1b-3d6c8f4a2b7e"
            Name="v3Netbill Agent"
-           Version="1.0.19.0"
+           Version="1.0.20.0"
            Manufacturer="v3Netbill"
            Language="1033"
            Codepage="65001"
@@ -73,6 +74,7 @@
       <ComponentGroupRef Id="SvcDepComponents" />        <!-- dari generator -->
       <ComponentGroupRef Id="OverlayExeComponents" />
       <ComponentGroupRef Id="OverlayDepComponents" />    <!-- dari generator -->
+      <ComponentGroupRef Id="RustDeskComponents" />
       <ComponentGroupRef Id="ConfigComponents" />
       <ComponentGroupRef Id="OverlayStartupComponents" />
       <ComponentGroupRef Id="UninstallShortcutComponents" />
@@ -114,6 +116,12 @@
       <Directory Id="INSTALLFOLDER" Name="v3NetbillAgent">
         <Directory Id="SVCFOLDER" Name="Agent.Service" />
         <Directory Id="OVERLAYFOLDER" Name="Agent.Overlay" />
+        <!-- ⚠️ BUKAN folder instalasi RustDesk. RustDesk dirinya memasang
+             ke path default-nya sendiri (C:\Program Files\RustDesk); folder
+             ini hanya tempat MSI menaruh installer EXE-nya untuk lalu
+             dijalankan sekali. Diberi nama lain supaya tidak tertukar
+             saat teknisi mencari "folder RustDesk" di PC. -->
+        <Directory Id="RUSTDESKINSTALLERDIR" Name="RustDeskInstaller" />
       </Directory>
     </StandardDirectory>
 
@@ -164,6 +172,28 @@
         <File Id="OverlayDepsJson" Source="$(var.OverlayPublishDir)Agent.Overlay.deps.json" />
         <File Id="OverlayRuntimeConfig" Source="$(var.OverlayPublishDir)Agent.Overlay.runtimeconfig.json" />
         <File Id="OverlayAppSettings" Source="$(var.OverlayPublishDir)appsettings.json" />
+        <CreateFolder />
+      </Component>
+    </ComponentGroup>
+
+    <!-- ===== RustDesk (installer EXE untuk remote repair) =====
+
+         ⚠️ Yang di sini adalah installer-nya, bukan aplikasi RustDesk yang
+         sudah terpasang. Custom action di bawah menjalankannya sekali dengan
+         switch silent-install, dan RustDesk lalu memasang dirinya ke path
+         default-nya sendiri.
+
+         EXE-nya sengaja TIDAK dihapus setelah dijalankan: menghapus file
+         milik komponen MSI yang sama bikin status komponen repanuh (file
+         hilang tapi MSI masih mengendalikannya), dan 24 MB itu tidak berat
+         untuk PC warnet. Kalau nanti dihapus, hapus sekaligus dengan
+         RemoveFile yang dijadwalkan di RemoveExistingProducts. -->
+    <ComponentGroup Id="RustDeskComponents">
+      <Component Id="RustDeskInstallerExe" Directory="RUSTDESKINSTALLERDIR"
+                 Guid="{c3d4e5f6-a7b8-9012-cdef-a23456789012}">
+        <File Id="RustDeskInstallerExeFile"
+              Source="$(var.RustDeskInstaller)"
+              KeyPath="yes" />
         <CreateFolder />
       </Component>
     </ComponentGroup>
@@ -297,11 +327,41 @@
                   Impersonate="no"
                   Return="ignore" />
 
+    <!-- ===== RustDesk: jalankan installer-nya senyap =====
+
+         Switch silent-install adalah switch resmi RustDesk untuk EXE installer
+         (bukan NSIS /S, dan bukan juga paket MSI RustDesk). Switch wait
+         WAJIB: tanpanya installer-nya melepas diri dan custom action
+         kembali duluan, jadi MSI lanjut ke InstallFinalize selagi NSIS
+         masih menulis ke folder Program Files — dan bisa mengunci file
+         yang sedang dipakai uninstall.
+
+         Execute="deferred" supaya jalan sebagai SYSTEM: service RustDesk
+         harus terpasang ke mesin, bukan ke profil user yang sedang login.
+
+         Return="ignore" dengan sengaja, sama seperti alasan ClearMaintenanceAction:
+         Remote repair itu alat bantu. Kalau installer RustDesk gagal, PC
+         HARUS tetap bisa menerima agent dan membilling — bukan sebaliknya.
+         Kegagalan tidak diam-diam diam: exit code-nya ada di log MSI
+         (`msiexec /l*v`), dan service RustDesk yang tidak ada itu sendiri
+         sudah gejala yang jelas. -->
+    <CustomAction Id="InstallRustDeskAction"
+                  FileRef="RustDeskInstallerExeFile"
+                  ExeCommand="--silent-install -wait"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
     <InstallExecuteSequence>
       <Custom Action="UninstallGuardAction" Before="RemoveFiles"
               Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND NOT V3PINVERIFIED" />
       <Custom Action="ClearMaintenanceAction" After="RemoveExistingProducts"
               Condition="NOT KEEPMAINT" />
+      <!-- Setelah InstallFiles supaya EXE-nya sudah ada di disk, dan
+           sebelum InstallFinalize supaya masih di dalam satu transaksi
+           install. NOT REMOVE: uninstall TIDAK boleh memasang RustDesk. -->
+      <Custom Action="InstallRustDeskAction" After="InstallFiles"
+              Condition="NOT REMOVE" />
     </InstallExecuteSequence>
 
     <!-- ===== Shortcuts (start menu): shortcut "Uninstall v3Netbill Agent" di
