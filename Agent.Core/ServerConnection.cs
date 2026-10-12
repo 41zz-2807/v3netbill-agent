@@ -134,6 +134,7 @@ public sealed class ServerConnection : IAsyncDisposable
 
     /// <summary>Server mendorong hash PIN bypass/maintenance baru.</summary>
     public event EventHandler<BypassConfigEventArgs>? BypassConfigReceived;
+    public event EventHandler<PowerConfigEventArgs>? PowerConfigReceived;
 
     /// <summary>
     /// Benar hanya kalau socket benar-benar bisa dipakai: hidup menurut library
@@ -278,6 +279,18 @@ public sealed class ServerConnection : IAsyncDisposable
             if (payload != null)
             {
                 BypassConfigReceived?.Invoke(this, new BypassConfigEventArgs(payload.Hash ?? ""));
+            }
+            return Task.CompletedTask;
+        });
+
+        // Konfigurasi daya PC (sleep / screen off / screensaver) yang didorong
+        // server setelah admin mengubah sakelar di halaman Pengaturan.
+        client.On("agent:power_config", ctx =>
+        {
+            var payload = ctx.GetValue<PowerConfigPayload>(0);
+            if (payload != null)
+            {
+                PowerConfigReceived?.Invoke(this, new PowerConfigEventArgs(payload.PreventSleep));
             }
             return Task.CompletedTask;
         });
@@ -884,4 +897,13 @@ public sealed class OtpConfigEventArgs : EventArgs
     public string ChatId { get; }
 
     public bool Enabled => !string.IsNullOrWhiteSpace(BotToken) && !string.IsNullOrWhiteSpace(ChatId);
+}
+
+/// <summary>Konfigurasi daya PC yang didorong server.</summary>
+public sealed class PowerConfigEventArgs : EventArgs
+{
+    public PowerConfigEventArgs(bool preventSleep) => PreventSleep = preventSleep;
+
+    /// <summary>true = PC tidak tidur / layar tidak mati / screensaver tidak muncul.</summary>
+    public bool PreventSleep { get; }
 }

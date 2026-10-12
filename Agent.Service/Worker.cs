@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO.Pipes;
 using System.Text;
 using System.Threading;
@@ -119,6 +120,14 @@ public class Worker : BackgroundService
         // Mode: PC terkunci saat idle (tanpa sesi). Mulai dengan blokir Task Manager.
         SetTaskManagerBlocked(!maintenance);
 
+        // Terapkan pengaturan daya PC (sleep / screen off / screensaver).
+        // Default "true": PC warnet tidak boleh tidur / mati layar / muncul
+        // screensaver, karena ketiganya membuat pelanggan berhenti billing tanpa
+        // tahu kenapa.
+        var preventSleep = GetConfig("Agent:PreventSleep", "PreventSleep", "true")
+            .Equals("true", StringComparison.OrdinalIgnoreCase);
+        ApplyPowerSettings(preventSleep);
+
         var serverUrl = GetConfig("Server:Url", "ServerUrl", "http://localhost:3000");
         var pcId = GetConfig("Agent:PcId", "PcId", "PC001");
         var agentToken = GetConfig("Agent:Token", "AgentToken", "CHANGE_ME");
@@ -146,6 +155,7 @@ public class Worker : BackgroundService
         _serverConnection.OtpConfigReceived += OnOtpConfigReceived;
         _serverConnection.NextcloudConfigReceived += OnNextcloudConfigReceived;
         _serverConnection.BypassConfigReceived += OnBypassConfigReceived;
+        _serverConnection.PowerConfigReceived += OnPowerConfigReceived;
 
         // Supervisor koneksi. SocketIOClient 4.x hanya mencoba retry SELAMA
         // ConnectAsync() masih berjalan (ReconnectionAttempts=30); begitu koneksi
@@ -384,6 +394,299 @@ public class Worker : BackgroundService
         {
             _logger.LogError(ex, "Gagal menyimpan hash PIN bypass");
         }
+    }
+
+    /// <summary>
+    /// Terima dorongan konfigurasi daya dari server, simpan ke registry, lalu
+    /// terapkan ke PC ini.
+    /// </summary>
+    private void OnPowerConfigReceived(object? sender, PowerConfigEventArgs e)
+    {
+        try
+        {
+            using var key = Registry.LocalMachine.CreateSubKey(@"Software\v3Netbill\Agent", true);
+            key?.SetValue("PreventSleep", e.PreventSleep ? "true" : "false", RegistryValueKind.String);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Gagal menyimpan PreventSleep ke registry");
+        }
+
+        ApplyPowerSettings(e.PreventSleep);
+    }
+
+    /// <summary>
+    /// Terapkan pengaturan daya PC: sleep, screen off, dan screensaver.
+    ///
+    /// <para>
+    /// <c>preventSleep = true</c> berarti:
+    /// <list type="bullet">
+    /// <item>PC tidak tidur (standby timeout = 0 untuk AC dan DC)</item>
+    /// <item>Layar tidak mati sendiri (monitor timeout = 0 untuk AC dan DC)</item>
+    /// <item>Screensaver tidak muncul (ScreenSaveActive = 0 di semua profil user)</item>
+    /// </list>
+    /// </para>
+    ///
+    /// <para>
+    /// <c>preventSleep = false</c> mengembalikan ke pengaturan Windows normal
+    /// (standby 20/10 menit, monitor 10/5 menit, screensaver dibiarkan).
+    /// </para>
+    ///
+    /// <remarks>
+    /// ⚠️ <b>powercfg mengubah skema daya AKTIF untuk semua pengguna.</b> Ini
+    /// perubahan sistem-wide, bukan per-user. Kalau PC ini dipakai untuk hal lain
+    /// di luar warnet, pengikutannya akan terasa — itu konsekuensi yang disengaja.
+    ///
+    /// ⚠️ <b>Screensaver ditulis ke SEMUA profil di HKEY_USERS</b>, sama seperti
+    /// pola <see cref="SetTaskManagerBlocked"/>. Service jalan sebagai SYSTEM, jadi
+    /// Registry.CurrentUser menunjuk hive SYSTEM dan tidak pernah sampai ke akun
+    /// pelanggan yang sedang login.
+    /// </remarks>
+    /// </summary>
+    private void ApplyPowerSettings(bool preventSleep)
+    {
+        try
+        {
+            if (preventSleep)
+            {
+                // Simpan nilai asli SEBELUM diubah, supaya bisa dikembalikan.
+                SimpanNilaiDayaAsli();
+
+                // Standby timeout 0 = tidak pernah tidur.
+                JalankanPowerCfg("/change", "standby-timeout-ac", "0");
+                JalankanPowerCfg("/change", "standby-timeout-dc", "0");
+                // Monitor timeout 0 = layar tidak pernah mati sendiri.
+                JalankanPowerCfg("/change", "monitor-timeout-ac", "0");
+                JalankanPowerCfg("/change", "monitor-timeout-dc", "0");
+
+                SetScreensaver(false);
+                AgentLog.Write("Pengaturan daya: sleep OFF, screen off OFF, screensaver OFF");
+            }
+            else
+            {
+                // Kembalikan nilai asli kalau pernah disimpan.
+                if (PulihkanNilaiDayaAsli())
+                {
+                    SetScreensaver(true);
+                    AgentLog.Write("Pengaturan daya: dikembalikan ke nilai asli Windows");
+                }
+                else
+                {
+                    // Belum pernah disimpan = PC belum pernah diubah, biarkan.
+                    AgentLog.Write("Pengaturan daya: tidak ada nilai asli yang perlu dipulihkan");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Gagal menerapkan pengaturan daya");
+            AgentLog.Write(ex, "Gagal menerapkan pengaturan daya");
+        }
+    }
+
+    /// <summary>Jalankan powercfg dengan argumen yang diberikan.</summary>
+    private void JalankanPowerCfg(string perintah, string nama, string nilai)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "powercfg",
+                Arguments = $"{perintah} {nama} {nilai}",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            using var p = Process.Start(psi);
+            p?.WaitForExit(10000);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Gagal menjalankan powercfg {Perintah} {Nama} {Nilai}", perintah, nama, nilai);
+        }
+    }
+
+    /// <summary>
+    /// Simpan nilai timeout daya asli ke registry SEBELUM diubah.
+    ///
+    /// Hanya disimpan sekali — kalau sudah ada, jangan ditimpa, supaya nilai
+    /// asli dari Windows tidak hilang.
+    /// </summary>
+    private void SimpanNilaiDayaAsli()
+    {
+        try
+        {
+            using var key = Registry.LocalMachine.CreateSubKey(@"Software\v3Netbill\Agent", true);
+            if (key == null) return;
+
+            // Kalau sudah pernah disimpan, jangan timpa.
+            if (key.GetValue("PowerOriginalStandbyAc") != null) return;
+
+            // Baca nilai asli lewat powercfg /query.
+            var standbyAc = BacaPowerCfgValue("standby-timeout-ac");
+            var standbyDc = BacaPowerCfgValue("standby-timeout-dc");
+            var monitorAc = BacaPowerCfgValue("monitor-timeout-ac");
+            var monitorDc = BacaPowerCfgValue("monitor-timeout-dc");
+
+            key.SetValue("PowerOriginalStandbyAc", standbyAc, RegistryValueKind.String);
+            key.SetValue("PowerOriginalStandbyDc", standbyDc, RegistryValueKind.String);
+            key.SetValue("PowerOriginalMonitorAc", monitorAc, RegistryValueKind.String);
+            key.SetValue("PowerOriginalMonitorDc", monitorDc, RegistryValueKind.String);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Gagal menyimpan nilai daya asli");
+        }
+    }
+
+    /// <summary>
+    /// Pulihkan nilai timeout daya asli dari registry.
+    /// </summary>
+    /// <returns>true kalau ada nilai asli yang dipulihkan.</returns>
+    private bool PulihkanNilaiDayaAsli()
+    {
+        try
+        {
+            using var key = Registry.LocalMachine.OpenSubKey(@"Software\v3Netbill\Agent");
+            if (key == null) return false;
+
+            var standbyAc = key.GetValue("PowerOriginalStandbyAc") as string;
+            var standbyDc = key.GetValue("PowerOriginalStandbyDc") as string;
+            var monitorAc = key.GetValue("PowerOriginalMonitorAc") as string;
+            var monitorDc = key.GetValue("PowerOriginalMonitorDc") as string;
+
+            if (string.IsNullOrEmpty(standbyAc) && string.IsNullOrEmpty(standbyDc) &&
+                string.IsNullOrEmpty(monitorAc) && string.IsNullOrEmpty(monitorDc))
+            {
+                return false;
+            }
+
+            if (!string.IsNullOrEmpty(standbyAc))
+                JalankanPowerCfg("/change", "standby-timeout-ac", standbyAc);
+            if (!string.IsNullOrEmpty(standbyDc))
+                JalankanPowerCfg("/change", "standby-timeout-dc", standbyDc);
+            if (!string.IsNullOrEmpty(monitorAc))
+                JalankanPowerCfg("/change", "monitor-timeout-ac", monitorAc);
+            if (!string.IsNullOrEmpty(monitorDc))
+                JalankanPowerCfg("/change", "monitor-timeout-dc", monitorDc);
+
+            // Bersihkan setelah dipulihkan.
+            using var tulis = Registry.LocalMachine.CreateSubKey(@"Software\v3Netbill\Agent", true);
+            tulis?.DeleteValue("PowerOriginalStandbyAc", false);
+            tulis?.DeleteValue("PowerOriginalStandbyDc", false);
+            tulis?.DeleteValue("PowerOriginalMonitorAc", false);
+            tulis?.DeleteValue("PowerOriginalMonitorDc", false);
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Gagal memulihkan nilai daya asli");
+            return false;
+        }
+    }
+
+    /// <summary>Baca satu nilai timeout dari powercfg /query.</summary>
+    private string BacaPowerCfgValue(string nama)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "powercfg",
+                Arguments = $"/query {nama}",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+            };
+            using var p = Process.Start(psi);
+            var output = p?.StandardOutput.ReadToEnd() ?? "";
+            p?.WaitForExit(10000);
+
+            // Cari baris yang mengandung "Current AC Power Setting Index" atau
+            // "Current DC Power Setting Index" lalu ambil angka hex terakhir.
+            var baris = output.Split('\n')
+                .FirstOrDefault(b => b.Contains("Current AC Power Setting Index") ||
+                                     b.Contains("Current DC Power Setting Index"));
+            if (baris == null) return "0";
+
+            // Format: "Current AC Power Setting Index: 0x00000014"
+            var bagian = baris.Split(':');
+            if (bagian.Length < 2) return "0";
+            var hex = bagian[1].Trim();
+            if (hex.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            {
+                if (int.TryParse(hex.Substring(2), NumberStyles.HexNumber, null, out var desimal))
+                    return desimal.ToString();
+            }
+            return "0";
+        }
+        catch
+        {
+            return "0";
+        }
+    }
+
+    /// <summary>
+    /// Aktifkan / nonaktifkan screensaver untuk SEMUA profil user yang login.
+    ///
+    /// Pola yang sama dengan <see cref="SetTaskManagerBlocked"/>: tulis ke tiap
+    /// profil di HKEY_USERS, bukan CurrentUser (karena service jalan sebagai SYSTEM).
+    /// </summary>
+    private void SetScreensaver(bool aktif)
+    {
+        const string keyPath = @"Control Panel\Desktop";
+        var tersentuh = 0;
+
+        try
+        {
+            using (var hives = Registry.Users)
+            {
+                foreach (string sid in hives.GetSubKeyNames())
+                {
+                    if (sid.Equals("_Classes", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (sid.StartsWith(".", StringComparison.Ordinal)) continue;
+
+                    try
+                    {
+                        using var profil = hives.OpenSubKey(sid);
+                        if (profil == null) continue;
+                        using var key = profil.CreateSubKey(keyPath, true);
+                        if (key == null) continue;
+
+                        if (aktif)
+                        {
+                            // Hapus nilai = Windows memakai default (screensaver aktif).
+                            key.DeleteValue("ScreenSaveActive", false);
+                            key.DeleteValue("ScreenSaverIsSecure", false);
+                            key.DeleteValue("ScreenSaveTimeOut", false);
+                        }
+                        else
+                        {
+                            key.SetValue("ScreenSaveActive", "0", RegistryValueKind.String);
+                            key.SetValue("ScreenSaverIsSecure", "0", RegistryValueKind.String);
+                            key.SetValue("ScreenSaveTimeOut", "0", RegistryValueKind.String);
+                        }
+                        tersentuh++;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Gagal menulis screensaver untuk profil {Sid}", sid);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Gagal mengubah screensaver");
+            return;
+        }
+
+        try { BroadcastPolicyChange(); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Gagal menyiarkan WM_SETTINGCHANGE"); }
+
+        AgentLog.Write($"Screensaver {(aktif ? "diaktifkan" : "dimatikan")} untuk {tersentuh} profil user");
     }
 
     /// <summary>

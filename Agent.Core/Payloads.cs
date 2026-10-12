@@ -149,6 +149,21 @@ public sealed class BypassConfigPayload
     public string? Hash { get; set; }
 }
 
+/// <summary>
+/// Konfigurasi daya PC yang didorong server lewat <c>agent:power_config</c>.
+/// </summary>
+/// <remarks>
+/// <c>preventSleep = true</c> berarti PC tidak boleh tidur, layar tidak boleh
+/// mati sendiri, dan screensaver tidak boleh muncul — ketiganya membuat
+/// pelanggan berhenti billing tanpa tahu kenapa. <c>false</c> berarti
+/// dikembalikan ke pengaturan Windows normal.
+/// </remarks>
+public sealed class PowerConfigPayload
+{
+    [JsonPropertyName("preventSleep")]
+    public bool PreventSleep { get; set; }
+}
+
 /// <summary>Balasan ack <c>client:create_password</c> dari server.</summary>
 /// <remarks>
 /// Mengikuti <see cref="ClientLoginResultPayload"/>: nama C# untuk pembaca di

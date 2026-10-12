@@ -212,13 +212,26 @@ public partial class MainWindow : Window
                     _autoSembunyiMini = false;
                     _terakhirLocked = true;
                 }
-                else if (_terakhirLocked)
+                else
                 {
-                    // Cuma di detik loginlah (Locked true→false), bukan setiap
-                    // tick. Tanpa syarat ini, satu kali login sudah cukup untuk
-                    // membuat mini window auto-minimize terulang terus.
-                    _terakhirLocked = false;
-                    _autoSembunyiMini = true;
+                    // ⚠️ Kosongkan field login SETIAP kali layar kembali ke login.
+                    // Bug sebelumnya: field tidak pernah dikosongkan, jadi setelah
+                    // pelanggan selesai main, username dan password lama MASIH
+                    // terisi di layar login. Pelanggan berikutnya tinggal tekan MASUK
+                    // → langsung masuk ke sesi berbayar milik orang lain. Ini bukan
+                    // cuma tampilan — ini soal uang dan keamanan.
+                    KodeTextBox.Text = "";
+                    PasswordBox.Password = "";
+                    ErrorText.Visibility = Visibility.Collapsed;
+
+                    if (_terakhirLocked)
+                    {
+                        // Cuma di detik loginlah (Locked true→false), bukan setiap
+                        // tick. Tanpa syarat ini, satu kali login sudah cukup untuk
+                        // membuat mini window auto-minimize terulang terus.
+                        _terakhirLocked = false;
+                        _autoSembunyiMini = true;
+                    }
                 }
 
                 UpdateVisibility();
