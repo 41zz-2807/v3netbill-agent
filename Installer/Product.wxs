@@ -42,7 +42,7 @@
        ============================================= -->
   <Package UpgradeCode="7f3a9b1e-5c2d-4a8f-9e1b-3d6c8f4a2b7e"
            Name="v3Netbill Agent"
-           Version="1.0.22.0"
+           Version="1.0.24.0"
            Manufacturer="v3Netbill"
            Language="1033"
            Codepage="65001"
@@ -398,12 +398,25 @@
          "Internal error in Command Table".
 
          ⚠️ Password boleh mengandung spasi, jadi seluruh baris tetap dalam
-         satu pasangan kutip. Kalau operator mengetik karakter kutip, baris
-         akan rusak; itu alasan field-nya dibatasi practical. -->
+         satu pasangan kutip.
 
+         ⚠️ Eksekusi harus DIPISAH jadi dua custom action. Menulis properti
+         dari custom action yang dijadwalkan di execute sequence akan ditolak:
+
+             WIX0233: The CustomAction sets a property but its Execute
+             attribute is not 'immediate'
+
+         Jadi baris perintahnya ditulis SetProperty (immediate, mengisi
+         RUSTDESK_CMD), lalu action deferred hanya menjalankan isi properti itu
+         sebagai program. Ini pola MSI standar, bukan pilihan gaya. -->
+
+    <SetProperty Id="RUSTDESK_EXE"
+                 Value="[ProgramFiles64Folder]RustDesk\RustDesk.exe"
+                 Before="SetRustdeskPasswordAction"
+                 Sequence="execute" />
     <CustomAction Id="SetRustdeskPasswordAction"
-                  Property="RUSTDESK_CMD"
-                  Value="&quot;[ProgramFiles64Folder]RustDesk\RustDesk.exe --password [RUSTDESK_PASSWORD] -wait&quot;"
+                  Property="RUSTDESK_EXE"
+                  ExeCommand="--password [RUSTDESK_PASSWORD] -wait"
                   Execute="deferred"
                   Impersonate="no"
                   Return="ignore" />
