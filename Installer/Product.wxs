@@ -42,7 +42,7 @@
        ============================================= -->
   <Package UpgradeCode="7f3a9b1e-5c2d-4a8f-9e1b-3d6c8f4a2b7e"
            Name="v3Netbill Agent"
-           Version="1.0.21.0"
+           Version="1.0.22.0"
            Manufacturer="v3Netbill"
            Language="1033"
            Codepage="65001"
@@ -104,12 +104,14 @@
       <RegistrySearch Id="PrefillAgentToken" Root="HKLM" Key="Software\v3Netbill\Agent" Name="AgentToken" Type="raw" />
     </Property>
 
-    <!-- ===== RustDesk: password takawasi =====
+<!-- ===== RustDesk: password takawasi =====
 
-         Password ini hanya dipakai untuk MASUK ke PC ini lewat RustDesk saat
-         repair. Sengaja TIDAK dikirim ke backend dan tidak disimpan di
-         database — kalau database bocor, yang ikut bocor adalah akses remote
-         ke mesin yang sedang dipakai pelanggan, bukan sekadar data billing.
+         ⚠️ Path RustDesk TIDAK disimpan sebagai Property. Folder
+         [ProgramFiles64Folder]RustDesk\ dibuat oleh installer RustDesk
+         sendiri, bukan oleh MSI — mendeklarasikannya sebagai Directory +
+         CreateFolder akan membuat MSI ikut menghapus folder itu saat uninstall
+         walau RustDesk masih terpasang. Karena itu tidak ada Directory untuk
+         RustDesk, dan path-nya ditulis langsung di CustomAction.
 
          Secure="yes" supaya nilainya tidak ikut tercetak di log MSI verbos.
 
@@ -117,13 +119,6 @@
          terpasang tanpa password tetap, dan hanya custom action pemanggilnya
          yang dilewati. Itu pilihan operator, bukan kegagalan. -->
     <Property Id="RUSTDESK_PASSWORD" Secure="yes" />
-
-    <!-- Lokasi executable RustDesk setelah instalasi. Folder RustDesk TIDAK
-         dideklarasikan sebagai Directory milik MSI: folder itu dibuat oleh
-         installer RustDesk sendiri, bukan oleh kita. Kalau dideklarasikan +
-         CreateFolder, MSI akan ikut Jeonghapus folder itu saat uninstall
-         walau RustDesk masih terpasang. -->
-    <Property Id="RUSTDESK_EXE" Value="[ProgramFiles64Folder]RustDesk\RustDesk.exe" />
 
     <!-- ===== Uninstall protection: PIN admin (diverifikasi backend) memakai
          custom action Type 18 (Agent.Overlay.exe uninstall-guard) sebelum
@@ -380,21 +375,35 @@
          dikirim ke exe yang belum selesai memasang RustDesk dan tidak ada yang
          menerimanya.
 
-         SetProperty (bukan ExeCommand) karena targetnya file yang DILEWATI MSI
-         di luar InstallFiles — RustDesk.exe tidak pernah ada di dalam paket
-         MSI, jadi tidak bisa ditulis sebagai FileRef.
-
          -wait WAJIB, sama seperti di InstallRustDeskAction: tanpa itu proses
          melepas diri sebelum selesai menulis password ke config RustDesk.
 
          Condition memeriksa RUSTDESK_PASSWORD <> "" — operator boleh
-         meninggalkannya kosong, dan instalasi tetap harus berhasil. -->
-    <SetProperty Id="SetRustdeskPasswordAction"
-                 Value="&quot;[RUSTDESK_EXE]&quot; --password &quot;[RUSTDESK_PASSWORD]&quot; -wait"
-                 Before="SetRustdeskPasswordAction" Sequence="execute" />
+         meninggalkannya kosong, dan instalasi tetap harus berhasil.
+
+         ⚠️ Eksekusi ini TIDAK memakai WixQuietExec. Percobaan pertama memakai
+         `BinaryRef="WixCA"` + `DllEntry="WixQuietExec64"` dan CI menolaknya:
+
+             WIX0094: The identifier 'Binary:WixCA' could not be found
+
+         WixCA berada di extension `WixToolset.Util`, yang TIDAK ikut terpasang
+         hanya karena UI sudah terpasang — dan `wix extension add` tidak bisa
+         dijalankan di Linux untuk diverifikasi. Versi ini memakai CustomAction
+         Tipe 18 (jalankan EXE langsung), yang tidak butuh binary DLL apa pun
+         sehingga tidak menambah ketergantungan baru sama sekali.
+
+         ⚠️ Format EXE Type 18: Area EXE harus null-terminated, argumen dipisah
+         spasi, dan SELURUH string ditutup satu pasangan tanda kutip MSI — bukan
+         satu pasang per argumen. Format per-argumen ditolak MSI dengan
+         "Internal error in Command Table".
+
+         ⚠️ Password boleh mengandung spasi, jadi seluruh baris tetap dalam
+         satu pasangan kutip. Kalau operator mengetik karakter kutip, baris
+         akan rusak; itu alasan field-nya dibatasi practical. -->
+
     <CustomAction Id="SetRustdeskPasswordAction"
-                  BinaryRef="WixCA"
-                  DllEntry="WixQuietExec64"
+                  Property="RUSTDESK_CMD"
+                  Value="&quot;[ProgramFiles64Folder]RustDesk\RustDesk.exe --password [RUSTDESK_PASSWORD] -wait&quot;"
                   Execute="deferred"
                   Impersonate="no"
                   Return="ignore" />
