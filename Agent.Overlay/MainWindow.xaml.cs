@@ -240,6 +240,145 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>Tahap terakhir yang diketahui, dipakai untuk countdown restart.</summary>
+    private string _updateTahapTerakhir = "";
+
+    /// <summary>Sisa detik sebelum restart; 0 = tidak menghitung.</summary>
+    private int _hitungMundurRestart = 0;
+
+    /// <summary>
+    /// Terapkan laporan progres pembaruan yang datang dari service.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ File ini tidak bisa diuji di Linux — Agent.Overlay menyasar
+    /// net8.0-windows dan memakai WPF. Yang sudah dipisah agar bisa diuji di
+    /// Agent.Core adalah rumus persentasenya (AutoUpdater.TahapProgress); yang
+    /// tersisa di sini benar-benar hanya memetakan angka ke kontrol WPF.
+    /// </remarks>
+    private void TerapkanProgresUpdate(string payload)
+    {
+        try
+        {
+            dynamic? data = JsonConvert.DeserializeObject(payload);
+            if (data == null) return;
+
+            var pesan = (string?)data.pesan;
+            var persen = (int?)data.persen ?? 0;
+            var tahap = (string?)data.tahap ?? "";
+
+            // 🔴 DIJEIT. Payload datang lewat pipe dari service; kalau karena
+            // suatu alasan nilainya di luar 0..100, Width dikali angka itu dan
+            // barnya meluber keluar panel tanpa error.
+            persen = Math.Clamp(persen, 0, 100);
+
+            _updateTahapTerakhir = tahap;
+
+            // 🔴 WAJIB dipanggil SEBELUM apa pun. Tanpa baris ini, update bisa
+            // berjalan tanpa panel sama sekali — pesan masuk, angka berubah,
+            // tapi tidak ada yang menampilkan.
+            if (UpdatePanel.Visibility != Visibility.Visible) TampilkanPanelUpdate();
+
+            UpdatePesan.Text = string.IsNullOrWhiteSpace(pesan) ? "Menyiapkan pembaruan..." : pesan;
+            UpdatePersen.Text = $"{persen}%";
+            UpdateBar.Width = LebarPanel * persen / 100.0;
+
+            // Hitung mundur hanya untuk tahap terakhir. Menampilkannya sejak
+            // awal membuat orang mengira PC akan restart sekarang juga.
+            if (tahap == "restart")
+            {
+                _hitungMundurRestart = HitungMundurAwal;
+                UpdateHitungMundur.Visibility = Visibility.Visible;
+                UpdateHitungMundur.Text = $"PC restart dalam {_hitungMundurRestart} detik...";
+                _hitungMundurRestartTicker?.Stop();
+                _hitungMundurRestartTicker = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+                _hitungMundurRestartTicker.Tick += HitungMundurRestart_Tick;
+                _hitungMundurRestartTicker.Start();
+            }
+
+            // Tahap "batal" dan "gagal" menutup panel, karena tidak ada lagi
+            // yang bisa dilakukan dari layar ini.
+            if (tahap is "batal" or "gagal")
+            {
+                TutupPanelUpdate();
+            }
+        }
+        catch (Exception ex)
+        {
+            // ⚠️ WAJIB. OnPipeMessage dipanggil dari event handler pipe; tanpa
+            // catch, satu payload rusak membuat overlay mati tepat di saat
+            // PC sedang installing.
+            AgentLog.Write($"Overlay: gagal menerapkan progres update: {ex.Message}");
+        }
+    }
+
+    /// <summary>Lebar isi panel update, dipakai untuk mengukur bar progres.</summary>
+    private const double LebarPanel = 360 - 48;
+
+    /// <summary>Awal hitung mundur sebelum restart paksa.</summary>
+    private const int HitungMundurAwal = 10;
+
+    private DispatcherTimer? _hitungMundurRestartTicker;
+
+    private void HitungMundurRestart_Tick(object? sender, EventArgs e)
+    {
+        _hitungMundurRestart--;
+        if (_hitungMundurRestart <= 0)
+        {
+            _hitungMundurRestartTicker?.Stop();
+            _hitungMundurRestartTicker = null;
+            return;
+        }
+        UpdateHitungMundur.Text = $"PC restart dalam {_hitungMundurRestart} detik...";
+    }
+
+    /// <summary>
+    /// Tampilkan panel pembaruan, dan pastikan tidak bisa ditutup.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ Layar tidak boleh bisa ditutup selama update berjalan.
+    /// Kalau bisa, satu klik membatalkan update di tengah unduhan, PC-nya
+    /// berhenti di kondisi setengah, dan operator harus datang ke tempat.
+    /// Karena itu panel dibuat tanpa tombol tutup, dan ESC tidak
+    /// menutup apa pun selama ini terlihat.
+    /// </remarks>
+    private void TampilkanPanelUpdate()
+    {
+        UpdatePanel.Visibility = Visibility.Visible;
+
+        // ⚠️ Tombol batal harus IKUT tampil. Versi pertama dibiarkan
+        // Collapsed di XAML "supaya tidak repot di reset", dan hasilnya tidak
+        // ada tombol sama sekali — kelas bug yang sama dengan fungsi
+        // TampilkanPanelUpdate yang sempat tidak pernah dipanggil.
+        BatalUpdateButton.Visibility = Visibility.Visible;
+        BatalUpdateButton.IsEnabled = true;
+    }
+
+    private void TutupPanelUpdate()
+    {
+        _hitungMundurRestartTicker?.Stop();
+        _hitungMundurRestartTicker = null;
+        UpdateHitungMundur.Visibility = Visibility.Collapsed;
+        UpdatePanel.Visibility = Visibility.Collapsed;
+        BatalUpdateButton.Visibility = Visibility.Collapsed;
+        UpdateBar.Width = 0;
+        _updateTahapTerakhir = "";
+    }
+
+    private async void BatalUpdateButton_Click(object sender, RoutedEventArgs e)
+    {
+        BatalUpdateButton.IsEnabled = false;
+        UpdatePesan.Text = "Membatalkan...";
+        try
+        {
+            await _pipeClient.SendBatalUpdateRequestAsync(_cts.Token);
+        }
+        catch (Exception ex)
+        {
+            AgentLog.Write($"Overlay: gagal mengirim permintaan batal: {ex.Message}");
+            BatalUpdateButton.IsEnabled = true;
+        }
+    }
+
     private void UpdateVisibility()
     {
         bool locked = _stateProxy.Locked;
@@ -398,6 +537,9 @@ public partial class MainWindow : Window
                     break;
                 case PipeMessageType.CreatePasswordResult:
                     HandleCreatePasswordResult(msg.Payload);
+                    break;
+                case PipeMessageType.UpdateProgress:
+                    TerapkanProgresUpdate(msg.Payload);
                     break;
                 case PipeMessageType.PowerResult:
                     HandlePowerResult(msg.Payload);

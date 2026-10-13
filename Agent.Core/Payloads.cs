@@ -200,6 +200,19 @@ public sealed class AutoUpdateProgressPayload
 
     [JsonPropertyName("persen")]
     public int Persen { get; set; }
+
+    /// <summary>
+    /// Tahap: unduh, verifikasi, pasang, selesai, gagal, atau batal.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ PENTING untuk tahap <c>batal</c>. Server memakai nilai itu untuk
+    /// LEPASTE flag auto-update di sisi server. Tanpa laporan batal, flag
+    /// masih nyala di server sementara agent sudah menyerah — dan PC itu
+    /// menolak sesi, tidak dimatikan otomatis, serta tidak akan pernah
+    /// update lagi: terkunci sampai operator membuka Halaman PC.
+    /// </remarks>
+    [JsonPropertyName("tahap")]
+    public string Tahap { get; set; } = "";
 }
 
 /// <summary>Balasan ack <c>client:create_password</c> dari server.</summary>

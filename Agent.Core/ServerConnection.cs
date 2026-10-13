@@ -730,7 +730,7 @@ public sealed class ServerConnection : IAsyncDisposable
     /// bukan alur update-nya. Melempar di sini akan menghentikan unduhan
     /// MSI 89 MB hanya karena satu emit gagal.
     /// </remarks>
-    public void KirimAutoUpdateProgress(string pesan, int persen)
+    public void KirimAutoUpdateProgress(string pesan, int persen, string? tahap = null)
     {
         if (string.IsNullOrWhiteSpace(_pcId)) return;
         var clamped = Math.Clamp(persen, 0, 100);
@@ -754,6 +754,7 @@ public sealed class ServerConnection : IAsyncDisposable
                     AgentToken = _agentToken,
                     Pesan = pesan,
                     Persen = clamped,
+                    Tahap = tahap ?? "",
                 },
             });
         }

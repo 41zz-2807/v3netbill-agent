@@ -17,6 +17,10 @@ namespace V3Netbill.Agent.Service;
 /// <summary>
 /// Named pipe message types for Service ↔ Overlay communication.
 /// </summary>
+/// <summary>
+/// ⚠️ SALINAN dari enum yang sama di <c>Agent.Overlay/PipeClient.cs</c>. Lihat
+/// catatan di sana: nilai baru wajib ditambah di kedua file.
+/// </summary>
 internal enum PipeMessageType
 {
     // Service → Overlay
@@ -840,7 +844,7 @@ public class Worker : BackgroundService
             PipeMessageType.UpdateProgress,
             Newtonsoft.Json.JsonConvert.SerializeObject(new { pesan, persen, tahap })));
 
-        _serverConnection?.KirimAutoUpdateProgress(pesan, persen);
+        _serverConnection?.KirimAutoUpdateProgress(pesan, persen, tahap);
     }
 
     private bool BolehUpdate()
@@ -1541,6 +1545,26 @@ public class Worker : BackgroundService
                     // menyisakan berkas separuh di disk.
                     _autoUpdateBatal = true;
                     AgentLog.Write("Auto-update: teknisi menekan BATALKAN update");
+
+                    // 🔴 KIRIM KE SERVER, bukan hanya ke overlay.
+                    //
+                    // Tanpa baris ini, flag autoUpdate masih true di database
+                    // sementara agent sudah menyerah. PC itu menolak sesi, tidak
+                    // dimatikan otomatis, dan tidak akan pernah update lagi --
+                    // terkunci sampai operator membuka Halaman PC. Ini satu-satunya
+                    // tempat di mana "menyerah" tidak berarti "berhenti".
+                    LaporkanProgres("batal", null);
+
+                    // Sakelar dimatikan DI SINI juga, supaya unduhan yang sedang
+                    // berjalan berhenti di titik berikutnya dan tidak sempat
+                    // memanggil msiexec.
+                    _autoUpdateAktif = false;
+                    AturTimerAutoUpdate();
+                    using (var key = Registry.LocalMachine.CreateSubKey(@"Software\v3Netbill\Agent", true))
+                    {
+                        key?.SetValue("AutoUpdateEnabled", "false", RegistryValueKind.String);
+                    }
+
                     await SendToOverlayAsync(new PipeMessage(
                         PipeMessageType.UpdateProgress,
                         JsonConvert.SerializeObject(new

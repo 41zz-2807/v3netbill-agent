@@ -639,5 +639,96 @@
             </Button>
         </StackPanel>
 
+        <!-- ===== PANEL PEMBARUAN =====
+             ⚠️ WAJIB anak langsung RootGrid, bukan anak ContentPanel.
+             ContentPanel di-collapse setiap kali ada sesi berjalan (lihat
+             UpdateVisibility), jadi apa pun di dalamnya ikut lenyap — gejalanya
+             persis seperti tombol yang ditekan tapi tidak melakukan apa pun.
+
+             ⚠️ WAJIB PALING AKHIR, supaya tidak tertimpa elemen lain. Border di
+             dalam Grid tanpa HorizontalAlignment/VerticalAlignment merebut
+             seluruh tinggi jendela, dan dengan_topmost dia akan menutupi
+             kartu login maupun mini panel.
+
+             ⚠️ Border 1px, bukan DropShadowEffect. Di bawah RDP tanpa GPU,
+             BlurRadius tidak diburamai dan tergambar sebagai kotak transparan
+             tepat di sekeliling panel — persis cacat yang sudah pernah ada
+             di mini panel. -->
+        <Border x:Name="UpdatePanel"
+                Background="#FFFFFFFF"
+                CornerRadius="16"
+                BorderBrush="#F59E0B" BorderThickness="2"
+                Width="360"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Visibility="Collapsed">
+            <StackPanel Margin="24,22">
+                <TextBlock Text="PC INI SEDANG DIPERBARUI"
+                           FontSize="16" FontWeight="Bold" Foreground="#B45309"
+                           TextWrapping="Wrap"/>
+                <TextBlock x:Name="UpdatePesan"
+                           Text="Menyiapkan pembaruan..."
+                           FontSize="13" Foreground="#475569"
+                           Margin="0,8,0,0" TextWrapping="Wrap"/>
+
+                <!-- ⚠️ Timeline memakai Border tipis, bukan ProgressBar bawaan.
+                     ProgressBar bawaan punya tinggi dan template sendiri yang memakai
+                    ruang; di dalam panel 360px ia membuat bar melebar dan
+                    mengubah tinggi panel yang sudah dihitung. -->
+                <!-- ⚠️ ClipToBounds WAJIB. Bar punya sudut siku, border luar membulat,
+                     dan tanpa clip keduanya akan terlihat tumpang tindih. -->
+                <Border Height="6" CornerRadius="3" ClipToBounds="True" Background="#FDE68A" Margin="0,16,0,0">
+                    <Grid>
+                        <Border x:Name="UpdateBarLatar" Background="#E2E8F0" CornerRadius="3"/>
+                        <Border x:Name="UpdateBar" Background="#F59E0B" CornerRadius="3"
+                                HorizontalAlignment="Left"/>
+                    </Grid>
+                </Border>
+
+                <TextBlock x:Name="UpdatePersen"
+                           Text="0%"
+                           FontSize="12" FontWeight="SemiBold" Foreground="#92400E"
+                           HorizontalAlignment="Right" Margin="0,6,0,0"/>
+
+                <!-- ⚠️ Hanya tampil kalau ada hitung mundur restart. Di tahap
+                     lain disembunyikan supaya panel tidak punya baris kosong. -->
+                <TextBlock x:Name="UpdateHitungMundur"
+                           Visibility="Collapsed"
+                           FontSize="13" FontWeight="Bold" Foreground="#DC2626"
+                           Margin="0,12,0,0" TextWrapping="Wrap"/>
+
+                <TextBlock Text="Jangan matikan listrik PC ini. PC akan restart sendiri setelah selesai."
+                           FontSize="11" Foreground="#64748B"
+                           Margin="0,14,0,0" TextWrapping="Wrap"/>
+
+                <!-- ⚠️ Hanya untuk teknisi. Pelanggan tidak boleh bisa membatalkan
+                     pembaruan — kalau bisa, PC-nya berhenti di tengah dan
+                     operator harus datang ke tempat. -->
+                <Button x:Name="BatalUpdateButton"
+                        Content="Batalkan update"
+                        Click="BatalUpdateButton_Click"
+                        Margin="0,14,0,0"
+                        Padding="12,7"
+                        Cursor="Hand">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="bd" CornerRadius="8"
+                                    Background="#FFFFFF" BorderBrush="#CBD5E1" BorderThickness="1"
+                                    Padding="12,7">
+                                <TextBlock Text="Batalkan update"
+                                           FontSize="12" Foreground="#475569"
+                                           HorizontalAlignment="Center"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="bd" Property="Background" Value="#F1F5F9"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+            </StackPanel>
+        </Border>
+
     </Grid>
 </Window>

@@ -172,6 +172,17 @@ public class PipeClient : IDisposable
         await SendAsync(new PipeMessage(PipeMessageType.OtpRequest, "{}"), ct);
     }
 
+    /// <summary>Minta service membatalkan pembaruan yang sedang berjalan.</summary>
+    /// <remarks>
+    /// ⚠️ Minta, bukan membatalkan sendiri. Overlay tidak tahu apa yang sedang
+    /// diunduh atau sedang dipasang; membatalkan di sini akan meninggalkan
+    /// berkas separuh di disk. Service yang memutuskan dan membersihkan.
+    /// </remarks>
+    public async Task SendBatalUpdateRequestAsync(CancellationToken ct = default)
+    {
+        await SendAsync(new PipeMessage(PipeMessageType.BatalUpdateRequest, "{}"), ct);
+    }
+
     /// <summary>Minta service mengganti password sebuah kode.</summary>
     public async Task SendCreatePasswordRequestAsync(string kode, string passwordLama, string password, CancellationToken ct = default)
     {
@@ -204,6 +215,14 @@ public class PipeClient : IDisposable
 }
 
 // Shared message types (must match Service)
+/// <summary>
+/// ⚠️ SALINAN dari enum yang sama di <c>Agent.Service/Worker.cs</c>.
+///
+/// Dua definisi, bukan satu — dan itu DUBAHAN yang mudah dilupakan. Menambah
+/// nilai di satu sisi saja tidak akan error saat build service, hanya saat
+/// build overlay, dan gejalanya "pesan tidak sampai" bukan "kode salah".
+/// Setiap nilai baru WAJIB ditambah di kedua file dengan nomor yang sama.
+/// </summary>
 public enum PipeMessageType
 {
     StateUpdate = 1,
@@ -216,13 +235,15 @@ public enum PipeMessageType
     OtpResult = 8,
     CreatePasswordResult = 9,
     PowerResult = 10,
+    UpdateProgress = 11,
     LoginRequest = 100,
     PinVerifyRequest = 101,
     StateRequest = 102,
     StopSessionRequest = 103,
     OtpRequest = 104,
     CreatePasswordRequest = 105,
-    PowerRequest = 106
+    PowerRequest = 106,
+    BatalUpdateRequest = 107
 }
 
 public record PipeMessage(PipeMessageType Type, string Payload);
