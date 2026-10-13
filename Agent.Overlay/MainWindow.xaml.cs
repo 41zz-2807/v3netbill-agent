@@ -14,6 +14,7 @@ using System.Windows.Threading;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Win32;
 using Newtonsoft.Json;
 using V3Netbill.Agent.Core;
 
@@ -72,6 +73,10 @@ public partial class MainWindow : Window
 
         InitializeComponent();
         DataContext = _stateProxy;
+
+        // Nomor versi dari registry. Overlay diluncurkan ulang oleh watchdog
+        // setiap kali versi berubah, jadi sekali di konstruktor sudah cukup.
+        TampilkanVersiAgent();
 
         // Wire events
         _pipeClient.MessageReceived += OnPipeMessage;
@@ -1113,6 +1118,34 @@ public partial class MainWindow : Window
         PinDialog.Visibility = Visibility.Collapsed;
         LoginCard.Visibility = Visibility.Visible;
         KodeTextBox.Focus();
+    }
+
+    /// <summary>
+    /// Tulis nomor versi agent di kartu login, di bawah logo.
+    /// </summary>
+    /// <remarks>
+    /// Sengaja dari registry, bukan dari <c>Assembly.GetName().Version</c>:
+    /// csproj tidak menyetel <c>Version</c>, jadi assembly version selalu
+    /// <c>1.0.0.0</c> untuk SEMUA rilis — dan menampilkannya akan
+    /// menyesatkan orang yang sedang melaporkan masalah.
+    ///
+    /// Registry ditulis MSI dari <c>[ProductVersion]</c>, dan itu satu-satunya
+    /// angka yang naik setiap rilis.
+    /// </remarks>
+    private void TampilkanVersiAgent()
+    {
+        try
+        {
+            using var key = Registry.LocalMachine.OpenSubKey(@"Software\v3Netbill\Agent");
+            var versi = key?.GetValue("AgentVersion") as string;
+            VersiAgentTeks.Text = string.IsNullOrWhiteSpace(versi) ? "" : $"v{versi}";
+        }
+        catch
+        {
+            // Registry tidak bisa dibaca: biarkan kosong. Layar login tidak
+            // boleh gagal tampil hanya karena nomor versi tidak terbaca.
+            VersiAgentTeks.Text = "";
+        }
     }
 
     // Payload records

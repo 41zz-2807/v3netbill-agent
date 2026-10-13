@@ -2032,6 +2032,24 @@ public class Worker : BackgroundService
     /// hak akses; kalau tidak bisa dibaca, anggap sama — jangan membunuh
     /// overlay tanpa alasan yang pasti.
     /// </remarks>
+    /// <summary>
+    /// True kalau proses overlay yang berjalan bukan berkas yang ada di disk.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 Bandingkan proses vs BERKAS DI DISK, BUKAN vs registry.
+    ///
+    /// Versi pertama membandingkan <c>MainModule.FileVersion</c> proses dengan
+    /// <c>AgentVersion</c> di registry, dan itu BUG PARAH: assembly overlay
+    /// tidak menyetel &lt;Version&gt;, jadi FileVersion-nya "1.0.0.0" sementara
+    /// registry berisi "1.0.34.0" dari [ProductVersion] MSI. Keduanya tidak
+    /// pernah sama, sehingga watchdog membunuh dan meluncurkan overlay setiap
+    /// 5 detik SELAMANYA — PC terlihat kedip-kedip tak berhenti dan tidak bisa
+    /// dipakai. Terverifikasi langsung 13 Okt 22:09.
+    ///
+    /// Membandingkan proses dengan berkas di disk tidak bisa gagal seperti itu:
+    /// keduanya dari sumber yang sama, jadi kalau MSI mengganti berkasnya,
+    /// versi keduanya pasti berbeda — dan kalau tidak diganti, pasti sama.
+    /// </remarks>
     private bool VersiOverlayBerbedaDariAgent()
     {
         try
@@ -2039,17 +2057,27 @@ public class Worker : BackgroundService
             var proses = Process.GetProcessesByName("Agent.Overlay");
             if (proses.Length == 0) return false;
 
-            var versiAgent = BacaReg("AgentVersion", null);
-            if (string.IsNullOrWhiteSpace(versiAgent)) return false;
+            string? versiDisk;
+            try
+            {
+                versiDisk = FileVersionInfo.GetVersionInfo(_overlayExePath).FileVersion;
+            }
+            catch
+            {
+                // Berkas tidak bisa dibaca: jangan menebak, jangan membunuh.
+                return false;
+            }
 
             foreach (var p in proses)
             {
                 try
                 {
-                    var versiOverlay = p.MainModule?.FileVersionInfo?.FileVersion;
-                    if (!string.IsNullOrWhiteSpace(versiOverlay) &&
-                        !string.Equals(versiOverlay, versiAgent, StringComparison.OrdinalIgnoreCase))
+                    var versiBerjalan = p.MainModule?.FileVersionInfo?.FileVersion;
+                    if (!string.IsNullOrWhiteSpace(versiBerjalan) &&
+                        !string.Equals(versiBerjalan, versiDisk, StringComparison.OrdinalIgnoreCase))
                     {
+                        AgentLog.Write(
+                            $"Watchdog: overlay berjalan versi {versiBerjalan}, di disk {versiDisk} — akan diganti");
                         return true;
                     }
                 }

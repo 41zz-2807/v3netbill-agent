@@ -143,27 +143,34 @@
                 </Border.Effect>
                 <StackPanel>
 
-                    <!-- Header: logo + judul. Judul memakai gaya mockup — kapital dengan
-                   jarak antar huruf lebar, bukan tebal. Isinya "LOGIN" saja
-                   supaya sama dengan halaman web; field di bawahnya yang
-                   menjelaskan ini kode voucher/member, lewat teks
-                   placeholder-nya. -->
+                    <!-- Header: logo + nomor versi agent. Tulisan judul teks
+                   pernah ada di sini ("LOGIN", kapital dengan jarak antar
+                   huruf lebar), tapi dihapus atas permintaan operator 13 Okt
+                   karena cuma menambah tinggi. Field di bawahnya menjelaskan
+                   ini kode voucher/member lewat teks placeholder-nya. -->
                   <Border Background="#FFFFFFFF" CornerRadius="28,28,0,0" Padding="28,26">
                       <StackPanel>
                           <Image Source="/Assets/logo-v3netbill.png"
                                  Height="46"
                                  Stretch="Uniform"
                                  HorizontalAlignment="Center"
-                                 Margin="0,0,0,14"/>
-                          <TextBlock Text="LOGIN"
-                                     FontSize="19"
-                                     FontWeight="Normal"
-                                     Foreground="#1E293B"
-                                     HorizontalAlignment="Center">
-                              <TextBlock.LayoutTransform>
-                                  <ScaleTransform ScaleX="1.2"/>
-                              </TextBlock.LayoutTransform>
-                          </TextBlock>
+                                 Margin="0,0,0,8"/>
+                          <!-- ⚠️ Nomor versi menggantikan tulisan "LOGIN".
+                               Permintaan operator 13 Okt: judul teks itu cuma
+                               menambah tinggi, dan yang dibutuhkan orang yang
+                               menghubungi teknisi adalah MENGETAHUI VERSI
+                               TERPASANG, bukan membaca kata "LOGIN".
+
+                               Dibaca dari registry (HKLM\Software\v3Netbill\Agent
+                               -> AgentVersion), yang ditulis MSI dari
+                               [ProductVersion]. BUKAN dari assembly version:
+                               csproj tidak menyetel Version, jadi assembly
+                               version selalu 1.0.0.0 dan tidak ada gunanya. -->
+                          <TextBlock x:Name="VersiAgentTeks"
+                                     Text=""
+                                     FontSize="11"
+                                     Foreground="#64748B"
+                                     HorizontalAlignment="Center"/>
                       </StackPanel>
                   </Border>
 
