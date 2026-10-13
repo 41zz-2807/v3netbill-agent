@@ -1877,6 +1877,20 @@ public class Worker : BackgroundService
         // sekali di ExecuteAsync, dan FlagPaths.MigrasiFlagLama() idempoten
         // (file-nya sudah hilang setelah migrasi pertama).
 
+        // 🔴 Overlay beda versi dengan agent → ganti. Tanpa ini, overlay yang
+        // berjalan sejak sebelum MSI install tidak pernah diganti, dan fix
+        // overlay tidak pernah aktif sampai reboot penuh. Terverifikasi
+        // 13 Okt: agent restart 18:56:21, overlay terakhir start 18:20:29.
+        if (VersiOverlayBerbedaDariAgent())
+        {
+            foreach (var p in Process.GetProcessesByName("Agent.Overlay"))
+            {
+                try { p.Kill(); } catch { /* sudah mati / tidak bisa diakses */ }
+            }
+            AgentLog.Write("Watchdog: overlay versi lama dibunuh — akan diluncurkan ulang dengan versi baru");
+            return; // tick berikutnya (5 detik) akan meluncurkan overlay baru
+        }
+
         // Mode maintenance: PC sedang TERBUKA tanpa penagihan. Jangan luncurkan
         // overlay, dan pastikan ini terlihat di agent.log.
         //
@@ -1997,6 +2011,58 @@ public class Worker : BackgroundService
         catch
         {
             return bawaan;
+        }
+    }
+
+    /// <summary>
+    /// True kalau overlay yang sedang berjalan beda versi dengan agent.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 Ini menutup celah yang membuat fix overlay tidak pernah aktif.
+    ///
+    /// MSI install tanpa reboot penuh mengganti binary di disk, tapi proses
+    /// overlay yang sudah berjalan tidak pernah diganti — dan watchdog tidak
+    /// meluncurkannya ulang karena masih ada prosesnya. Akibatnya overlay
+    /// tertinggal beberapa rilis di belakang agent.
+    ///
+    /// Terverifikasi 13 Okt: agent restart 18:56:21, overlay terakhir start
+    /// 18:20:29 — tertinggal dua rilis (1.0.31.0 vs 1.0.33.0).
+    ///
+    /// ⚠️ Hanya membunuh kalau versi benar-benar berbeda. `MainModule` butuh
+    /// hak akses; kalau tidak bisa dibaca, anggap sama — jangan membunuh
+    /// overlay tanpa alasan yang pasti.
+    /// </remarks>
+    private bool VersiOverlayBerbedaDariAgent()
+    {
+        try
+        {
+            var proses = Process.GetProcessesByName("Agent.Overlay");
+            if (proses.Length == 0) return false;
+
+            var versiAgent = BacaReg("AgentVersion", null);
+            if (string.IsNullOrWhiteSpace(versiAgent)) return false;
+
+            foreach (var p in proses)
+            {
+                try
+                {
+                    var versiOverlay = p.MainModule?.FileVersionInfo?.FileVersion;
+                    if (!string.IsNullOrWhiteSpace(versiOverlay) &&
+                        !string.Equals(versiOverlay, versiAgent, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+                catch
+                {
+                    // MainModule butuh hak akses; lewati proses ini.
+                }
+            }
+            return false;
+        }
+        catch
+        {
+            return false;
         }
     }
 
