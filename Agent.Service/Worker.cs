@@ -57,6 +57,14 @@ public class Worker : BackgroundService
     private Task? _pipeListenerTask;
     private Timer? _watchdogTimer;
         private Timer? _nextcloudTimer;
+    private Timer? _autoUpdateTimer;
+    private bool _autoUpdateAktif;
+    private int _autoUpdateGagalBeruntun;
+    // ⚠️ WAJIB ada. Tanpa ini, timer 6 jam dan event dari server bisa masuk
+    // bersamaan lalu dua msiexec jalan bersamaan untuk satu MSI yang sama —
+    // hasil yang paling mungkin: instalasi gagal setengah jalan dan PC tidak
+    // bisa billing.
+    private readonly SemaphoreSlim _autoUpdateLock = new(1, 1);
     private Task? _maintainTask;
     private SessionState _currentState = new() { State = SessionState.LockState.Locked };
     private string _overlayExePath = string.Empty;
@@ -156,6 +164,7 @@ public class Worker : BackgroundService
         _serverConnection.NextcloudConfigReceived += OnNextcloudConfigReceived;
         _serverConnection.BypassConfigReceived += OnBypassConfigReceived;
         _serverConnection.PowerConfigReceived += OnPowerConfigReceived;
+        _serverConnection.AutoUpdateConfigReceived += OnAutoUpdateConfigReceived;
 
         // Supervisor koneksi. SocketIOClient 4.x hanya mencoba retry SELAMA
         // ConnectAsync() masih berjalan (ReconnectionAttempts=30); begitu koneksi
@@ -176,6 +185,18 @@ public class Worker : BackgroundService
         // Start watchdog timer (check every 5 seconds)
         _watchdogTimer = new Timer(WatchdogCallback, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
 
+        // Pembaruan otomatis (self-update). Berkala, dan SENGAJA jeda awalnya
+        // lama supaya service tidak menabrak server tepat saat start.
+        //
+        // ⚠️ Default mati: _autoUpdateAktif hanya jadi true kalau server
+        // mengatakan sakelarnya nyata. Kalau server tidak bisa dihubungi, field
+        // ini tetap false dan TIDAK ADA percobaan install sama sekali.
+        _autoUpdateTimer = new Timer(
+            _ => _ = CekPembaruanOtomatis(_cts?.Token ?? default),
+            null,
+            TimeSpan.FromMinutes(30),
+            TimeSpan.FromHours(6));
+
         // Keep alive until cancellation
         try
         {
@@ -186,6 +207,7 @@ public class Worker : BackgroundService
         {
             _watchdogTimer?.Dispose();
         _nextcloudTimer?.Dispose();
+            _autoUpdateTimer?.Dispose();
             _pipeServer?.Dispose();
             if (_maintainTask != null)
             {
@@ -484,7 +506,372 @@ public class Worker : BackgroundService
         }
     }
 
-    /// <summary>Jalankan powercfg dengan argumen yang diberikan.</summary>
+    // ==================== PEMBARUAN OTOMATIS (SELF-UPDATE) ====================
+
+    /// <summary>
+    /// Terima status sakelar auto-update dari server.
+    /// </summary>
+    /// <remarks>
+    /// Yang dikirim cuma "sakelarnya nyala/tidak". TIDAK ada perintah install
+    /// di sini, dan itu disengaja: yang tahu versinya sendiri, yang tahu
+    /// sedang ada sesi, dan yang tahu teknisi sedang memperbaiki PC —
+    /// semuanya ada di PC ini, bukan di server.
+    /// </remarks>
+    private void OnAutoUpdateConfigReceived(object? sender, AutoUpdateConfigEventArgs e)
+    {
+        try
+        {
+            using var key = Registry.LocalMachine.CreateSubKey(@"Software\v3Netbill\Agent", true);
+            key?.SetValue("AutoUpdateEnabled", e.Aktif ? "true" : "false", RegistryValueKind.String);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Gagal menyimpan AutoUpdateEnabled ke registry");
+        }
+
+        if (_autoUpdateAktif == e.Aktif) return;
+        _autoUpdateAktif = e.Aktif;
+
+        AgentLog.Write($"Auto-update {(e.Aktif ? "DINYALAKAN" : "dimatikan")} dari server");
+
+        if (e.Aktif)
+        {
+            // Sakelar baru dinyalakan: cek sekarang, jangan tunggu timer 6 jam.
+            _ = CekPembaruanOtomatis(_cts?.Token ?? default);
+        }
+        // Sakelar dimatikan TIDAK membuat apa-apa. Kalau sedang mengunduh, proses
+        // yang sedang jalan menyelesaikan hashing-nya, lalu installation dicek
+        // ulang di bawah — dan `_autoUpdateAktif` sudah false, jadi berhenti.
+    }
+
+    /// <summary>
+    /// Alur lengkap: tanya server → putuskan → unduh → verifikasi → pasang.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Semua kegagalan DITELAN dan hanya ditulis ke log. Method ini dipanggil
+    /// dari <c>Timer</c> yang tidak di-await, jadi penolakan apa pun akan jadi
+    /// unhandled rejection — dan service yang mati berarti PC berhenti billing.
+    /// </para>
+    /// <para>
+    /// <b>Kondisi PC dibaca DUA KALI.</b> Yang pertama sebelum unduhan, yang
+    /// kedua tepat sebelum <c>msiexec</c>. Unduhan 89 MB bisa memakan puluhan
+    /// detik, dan dalam selang itu pelanggan bisa saja login. Kalau hanya
+    /// dibaca sekali di awal, installer akan berjalan di atas sesi yang baru
+    /// dimulai.
+    /// </para>
+    /// </remarks>
+    private async Task CekPembaruanOtomatis(CancellationToken cancel)
+    {
+        if (!_autoUpdateAktif) return;
+
+        // Cegah dua proses tumpang tindih: timer dan event push bisa keduanya
+        // memicu dalam waktu yang berdekatan.
+        if (!await _autoUpdateLock.WaitAsync(0, cancel)) return;
+
+        try
+        {
+            // Jeda setelah kegagalan. Tanpa ini satu MSI yang rusak akan dicoba
+            // ulang terus tiap 6 jam selama PC menyala.
+            if (_autoUpdateGagalBeruntun > 0 &&
+                DateTime.UtcNow - BacaPercobaanTerakhir() < AutoUpdater.JedaPercobaan)
+            {
+                return;
+            }
+
+            if (!BolehUpdate()) return;
+
+            using var klien = KlienPembaruan();
+            if (klien == null) return;
+
+            var info = await klien.CekAsync(cancel);
+            if (info == null)
+            {
+                CatatGagalUpdate("server tidak bisa dihubungi atau token ditolak");
+                return;
+            }
+
+            var versiLokal = BacaVersiTerpasang();
+            var keputusan = AutoUpdater.Putuskan(
+                versiLokal, info, SesiSedangBerjalan(), FlagPaths.MaintenanceAktif(), PcTerkunci());
+
+            if (keputusan != KeputusanUpdate.PerluUpdate)
+            {
+                // Berhasil bicara dengan server: agent sehat, reset penghitung.
+                _autoUpdateGagalBeruntun = 0;
+                if (keputusan == KeputusanUpdate.VersiTidakSah)
+                {
+                    AgentLog.Write(
+                        "Auto-update: versi MSI di server tidak terbaca — dilewati, JANGAN menebak");
+                }
+                return;
+            }
+
+            AgentLog.Write(
+                $"Auto-update: versi {info.Versi} tersedia (terpasang {versiLokal ?? "tidak diketahui"}). Mengunduh...");
+            SimpanPercobaanTerakhir();
+
+            var berkas = await klien.UnduhAsync(info.Versi, info.UkuranBytes, cancel);
+            if (berkas == null)
+            {
+                CatatGagalUpdate("unduhan gagal");
+                return;
+            }
+
+            // ⚠️ WAJIB sebelum apa pun. Berkas terpotong atau diganti di jalan
+            // akan membuat msiexec memasang apa saja ke PC ini.
+            if (!string.IsNullOrWhiteSpace(info.Sha256))
+            {
+                var hash = await HitungSha256Async(berkas, cancel);
+                if (!string.Equals(hash, info.Sha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    HapusBerkas(berkas);
+                    CatatGagalUpdate(
+                        $"sha256 tidak cocok (server {Ringkas(info.Sha256)}, lokal {Ringkas(hash)}) — berkas dibuang");
+                    return;
+                }
+                AgentLog.Write($"Auto-update: sha256 cocok ({hash}).");
+            }
+            else
+            {
+                // Server tidak memberi hash = kita tidak punya dasar apa pun
+                // untuk percaya pada berkas 89 MB dari jaringan. Menolak lebih
+                // aman daripada menebak.
+                HapusBerkas(berkas);
+                CatatGagalUpdate("server tidak mengirim sha256 — dipasang");
+                return;
+            }
+
+            // 🔴 PEMBACAAN KONDISI KEDUA. Ini yang melindungi sesi yang dimulai
+            // selama unduhan berlangsung.
+            if (!_autoUpdateAktif || !BolehUpdate())
+            {
+                HapusBerkas(berkas);
+                AgentLog.Write("Auto-update: kondisi PC berubah saat mengunduh — dipasang");
+                return;
+            }
+
+            AgentLog.Write("Auto-update: memasang MSI (msiexec /qn)...");
+            if (!PasangInstaller(berkas))
+            {
+                HapusBerkas(berkas);
+                CatatGagalUpdate("msiexec gagal");
+                return;
+            }
+
+            // ⚠️ Baris ini sering TIDAK tercapai. MajorUpgrade menghentikan
+            // service lebih dulu, jadi proses ini biasanya mati sebelum
+            // msiexec selesai. Itu normal, bukan tanda kegagalan.
+            AgentLog.Write("Auto-update: msiexec selesai tanpa menghentikan service.");
+            _autoUpdateGagalBeruntun = 0;
+        }
+        catch (OperationCanceledException)
+        {
+            AgentLog.Write("Auto-update: dibatalkan (service berhenti)");
+        }
+        catch (Exception ex)
+        {
+            // WAJIB: pemanggilnya Timer yang tidak ditunggu.
+            CatatGagalUpdate(ex.Message);
+        }
+        finally
+        {
+            _autoUpdateLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// PC boleh diperbarui sekarang? Semua syarat wajib terpenuhi.
+    /// </summary>
+    private bool BolehUpdate()
+    {
+        if (SesiSedangBerjalan())
+        {
+            // Ini kondisi NORMAL, bukan kegagalan. Jangan sentuh
+            // `_autoUpdateGagalBeruntun` — kalau tidak, PC yang sedang dipakai
+            // pelanggan akan terlihat "gagal" dan masuk jeda satu jam.
+            return false;
+        }
+        if (!PcTerkunci()) return false;
+        if (FlagPaths.MaintenanceAktif()) return false;
+        return true;
+    }
+
+    private bool SesiSedangBerjalan()
+    {
+        lock (_stateLock)
+        {
+            return _currentState.SedangBerjalan;
+        }
+    }
+
+    private bool PcTerkunci()
+    {
+        lock (_stateLock)
+        {
+            return _currentState.State == SessionState.LockState.Locked;
+        }
+    }
+
+    private static string? BacaVersiTerpasang() => BacaReg("AgentVersion", null);
+
+    private PembaruanClient? KlienPembaruan()
+    {
+        var serverUrl = GetConfig("Server:Url", "ServerUrl", "http://localhost:3000");
+        var pcId = GetConfig("Agent:PcId", "PcId", "PC001");
+        var agentToken = GetConfig("Agent:Token", "AgentToken", "");
+        if (string.IsNullOrWhiteSpace(agentToken))
+        {
+            AgentLog.Write("Auto-update: AgentToken kosong — dilewati");
+            return null;
+        }
+        return new PembaruanClient(serverUrl, pcId, agentToken);
+    }
+
+    /// <summary>
+    /// Pasang MSI secara senyap.
+    /// </summary>
+    /// <returns>true kalau msiexec keluar dengan kode 0 atau 3010.</returns>
+    /// <remarks>
+    /// <para>
+    /// ⚠️ <c>/qn</c> tanpa UI. Installer yang muncul di layar PC warnet akan
+    /// menghalangi pelanggan; dan kalau ada yang menekan Cancel di tengah,
+    /// MSI bisa tertinggal setengah terpasang — dan <b>PC itu tidak bisa billing
+    /// sampai teknisi memperbaikinya</b>.
+    /// </para>
+    /// <para>
+    /// ⚠️ <c>/norestart</c>: PC tidak boleh restart sendiri. Kalau memang perlu
+    /// restart, <c>3010</c> (REBOOT_REQUIRED) diperlakukan sebagai sukses —
+    ///Pemasangan sudah selesai, hanya restart yang tertunda.
+    /// </para>
+    /// </remarks>
+    private bool PasangInstaller(string path)
+    {
+        var log = path + ".log";
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "msiexec.exe",
+                Arguments = $"/i \"{path}\" /qn /norestart /l*v \"{log}\"",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+
+            using var proses = Process.Start(psi);
+            if (proses == null)
+            {
+                AgentLog.Write("Auto-update: msiexec tidak bisa dijalankan");
+                return false;
+            }
+
+            if (!proses.WaitForExit(AutoUpdater.TimeoutPasangDetik * 1000))
+            {
+                AgentLog.Write("Auto-update: msiexec melewati batas waktu");
+                return false;
+            }
+
+            // 0 = sukses. 3010 = sukses tapi perlu restart (ditunda).
+            if (proses.ExitCode is 0 or 3010)
+            {
+                AgentLog.Write($"Auto-update: msiexec keluar dengan kode {proses.ExitCode}. Log: {log}");
+                return true;
+            }
+
+            AgentLog.Write($"Auto-update: msiexec keluar dengan kode {proses.ExitCode}. Log: {log}");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            AgentLog.Write($"Auto-update: menjalankan msiexec gagal: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static async Task<string?> HitungSha256Async(string path, CancellationToken cancel)
+    {
+        try
+        {
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            await using var stream = File.OpenRead(path);
+            var hash = await sha.ComputeHashAsync(stream, cancel);
+            return Convert.ToHexString(hash).ToLowerInvariant();
+        }
+        catch (Exception ex)
+        {
+            AgentLog.Write($"Auto-update: gagal menghitung sha256: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static void HapusBerkas(string? path)
+    {
+        try
+        {
+            if (!string.IsNullOrEmpty(path) && File.Exists(path)) File.Delete(path);
+        }
+        catch (Exception ex)
+        {
+            AgentLog.Write($"Auto-update: tidak bisa menghapus {path}: {ex.Message}");
+        }
+    }
+
+    private static string Ringkas(string? s) =>
+        string.IsNullOrWhiteSpace(s) ? "(kosong)" : (s.Length > 20 ? s[..20] + "..." : s);
+
+    private void CatatGagalUpdate(string alasan)
+    {
+        _autoUpdateGagalBeruntun++;
+        SimpanPercobaanTerakhir();
+        AgentLog.Write($"Auto-update DILEWATI ({_autoUpdateGagalBeruntun}x): {alasan}");
+    }
+
+    /// <summary>
+    /// Waktu percobaan terakhir, dari registry.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ WAJIB di registry, bukan hanya field di memory. Gagal update berarti
+    /// service di-restart oleh MSI — dan kalau jeda hanya disimpan di memory,
+    /// PC yang baru nyala akan langsung mencoba lagi tanpa jeda, berulang
+    /// setiap restart. Itu persis yang membuat MSI rusak terasa seperti
+    /// "PC nyala-nyal sendiri".
+    /// </remarks>
+    private static DateTime BacaPercobaanTerakhir()
+    {
+        try
+        {
+            using var key = Registry.LocalMachine.OpenSubKey(@"Software\v3Netbill\Agent");
+            var teks = key?.GetValue("AutoUpdateLastAttempt") as string;
+            if (long.TryParse(teks, out var ticks))
+            {
+                return new DateTime(ticks, DateTimeKind.Utc);
+            }
+        }
+        catch
+        {
+            // registry tidak terbaca = belum pernah mencoba
+        }
+        return DateTime.MinValue;
+    }
+
+    private static void SimpanPercobaanTerakhir()
+    {
+        try
+        {
+            using var key = Registry.LocalMachine.CreateSubKey(@"Software\v3Netbill\Agent", true);
+            key?.SetValue(
+                "AutoUpdateLastAttempt",
+                DateTime.UtcNow.Ticks.ToString(),
+                RegistryValueKind.String);
+        }
+        catch (Exception ex)
+        {
+            AgentLog.Write($"Auto-update: tidak bisa menyimpan waktu percobaan: {ex.Message}");
+        }
+    }
+
     private void JalankanPowerCfg(string perintah, string nama, string nilai)
     {
         try

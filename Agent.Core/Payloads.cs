@@ -164,6 +164,21 @@ public sealed class PowerConfigPayload
     public bool PreventSleep { get; set; }
 }
 
+/// <summary>
+/// Event <c>agent:auto_update_config</c> — server mendorong status sakelar
+/// pembaruan otomatis setelah admin mengubahnya di halaman Pengaturan.
+/// </summary>
+/// <remarks>
+/// Ini cuma informasi "sakelarnya nyala/tidak". Keputusan install tetap ada di
+/// PC: yang tahu versinya sendiri, yang tahu sedang ada sesi berjalan, dan yang
+/// tahu teknisi sedang maintenance. Server tidak pernah memerintahkan install.
+/// </remarks>
+public sealed class AutoUpdateConfigPayload
+{
+    [JsonPropertyName("aktif")]
+    public bool Aktif { get; set; }
+}
+
 /// <summary>Balasan ack <c>client:create_password</c> dari server.</summary>
 /// <remarks>
 /// Mengikuti <see cref="ClientLoginResultPayload"/>: nama C# untuk pembaca di

@@ -136,6 +136,9 @@ public sealed class ServerConnection : IAsyncDisposable
     public event EventHandler<BypassConfigEventArgs>? BypassConfigReceived;
     public event EventHandler<PowerConfigEventArgs>? PowerConfigReceived;
 
+    /// <summary>Server mengubah sakelar auto-update.</summary>
+    public event EventHandler<AutoUpdateConfigEventArgs>? AutoUpdateConfigReceived;
+
     /// <summary>
     /// Benar hanya kalau socket benar-benar bisa dipakai: hidup menurut library
     /// <b>dan</b> belum dinyatakan mati oleh pemeriksaan heartbeat kita.
@@ -291,6 +294,18 @@ public sealed class ServerConnection : IAsyncDisposable
             if (payload != null)
             {
                 PowerConfigReceived?.Invoke(this, new PowerConfigEventArgs(payload.PreventSleep));
+            }
+            return Task.CompletedTask;
+        });
+
+        // Status sakelar auto-update. Dibaca juga saat register, supaya agent
+        // yang baru konek langsung tahu apakah fiturnya boleh jalan.
+        client.On("agent:auto_update_config", ctx =>
+        {
+            var payload = ctx.GetValue<AutoUpdateConfigPayload>(0);
+            if (payload != null)
+            {
+                AutoUpdateConfigReceived?.Invoke(this, new AutoUpdateConfigEventArgs(payload.Aktif));
             }
             return Task.CompletedTask;
         });
@@ -906,4 +921,13 @@ public sealed class PowerConfigEventArgs : EventArgs
 
     /// <summary>true = PC tidak tidur / layar tidak mati / screensaver tidak muncul.</summary>
     public bool PreventSleep { get; }
+}
+
+/// <summary>Status sakelar pembaruan otomatis yang didorong server.</summary>
+public sealed class AutoUpdateConfigEventArgs : EventArgs
+{
+    public AutoUpdateConfigEventArgs(bool aktif) => Aktif = aktif;
+
+    /// <summary>true = admin menyalakan pembaruan otomatis.</summary>
+    public bool Aktif { get; }
 }
