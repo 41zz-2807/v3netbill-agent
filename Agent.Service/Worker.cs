@@ -618,6 +618,14 @@ public class Worker : BackgroundService
         else if (sebelumnya)
         {
             AgentLog.Write("Auto-update: sakelar dimatikan, timer 6 jam diaktifkan lagi");
+
+            // 🔴 Kartu di overlay harus ikut ditutup.
+            //
+            // Operator membatalkan tandaan dari Halaman PC berarti PC boleh
+            // dipakai lagi. Kalau kartu 100% dibiarkan menggantung, kasir
+            // mengira PC masih terkunci padahal sudah tidak — dan yang melihat
+            // hanyalah pesan di layar, bukan isi database.
+            LaporkanProgres("tutup", null);
         }
     }
 

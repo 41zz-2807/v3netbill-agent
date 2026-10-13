@@ -306,7 +306,17 @@ public partial class MainWindow : Window
 
             // Tahap "batal" dan "gagal" menutup panel, karena tidak ada lagi
             // yang bisa dilakukan dari layar ini.
-            if (tahap is "batal" or "gagal")
+            // 🔴 Semua tahap TERMINAL menutup kartu, bukan hanya batal/gagal.
+            //
+            // Versi lama hanya menutup untuk "batal" dan "gagal". Akibatnya
+            // tahap "diam" (PC sudah versi terbaru, persen 100) ditampilkan dan
+            // TIDAK PERNAH ditutup — kartu "100%" menggantung di atas form
+            // login selamanya. Terverifikasi 13 Okt 23:08: server sudah melepas
+            // flag dan versi sudah naik ke 1.0.35.0, tapi kartu masih tampil.
+            //
+            // "tutup" dipakai saat agent mematikan flag lewat perintah server,
+            // supaya kasir yang membatalkan tandaan tidak perlu reboot dulu.
+            if (tahap is "batal" or "gagal" or "diam" or "selesai" or "tutup")
             {
                 TutupStripUpdate();
             }
