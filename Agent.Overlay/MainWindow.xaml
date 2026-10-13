@@ -652,12 +652,27 @@
 
              ⚠️ WAJIB anak langsung RootGrid, bukan anak ContentPanel.
              ContentPanel di-collapse setiap kali ada sesi berjalan. -->
+        <!-- ⚠️ WAJIB anak langsung RootGrid dan paling akhir, supaya menutupi
+             ContentPanel (tempat LoginCard). ContentPanel di-collapse saat
+             sesi berjalan, tapi update hanya jalan saat PC terkunci, jadi
+             LoginCard selalu terlihat di bawah kartu ini.
+
+             ⚠️ Lebar di-bind ke LoginCard supaya persis menutupi form login.
+             Kartu terpusat, bukan strip selebar layar: permintaan operator
+             13 Okt — strip penuh menutupi wallpaper dan terasa seperti
+             salah satu aplikasi yang sedang loading. -->
         <Border x:Name="UpdateStrip"
-                Background="#FEF3C7"
-                BorderBrush="#F59E0B" BorderThickness="0,0,0,3"
-                VerticalAlignment="Top"
+                Background="#FFFFFFFF"
+                BorderBrush="#F59E0B" BorderThickness="2"
+                CornerRadius="28"
+                Width="{Binding ActualWidth, ElementName=LoginCard}"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
                 Visibility="Collapsed">
-            <StackPanel Margin="20,12">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="40" ShadowDepth="6" Opacity="0.18" Color="#0F172A"/>
+            </Border.Effect>
+            <StackPanel Margin="28,22">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
