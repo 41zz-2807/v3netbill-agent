@@ -584,7 +584,19 @@ public class Worker : BackgroundService
             _logger.LogWarning(ex, "Gagal menyimpan AutoUpdateEnabled ke registry");
         }
 
-        if (_autoUpdateAktif == e.Aktif) return;
+        // 🔴 JANGAN pernah early-return saat nilainya sama.
+        //
+        // Registry bisa basi, dan ini bukan teori: setelah update selesai,
+        // ForceReboot membunuh service sebelum kode setelah msiexec jalan,
+        // jadi registry tetap "true" selamanya. Kalau operator lalu menandai
+        // PC yang sedang offline, server mengirim {aktif: true} lagi — dan
+        // penjaga lama membuat keduanya sama, sehingga update tidak pernah
+        // dimulai. Terverifikasi 13 Okt: flag tersimpan saat offline, agent
+        // boot, registry true, server kirim true, tidak terjadi apa pun.
+        //
+        // Nilai lama disimpan dulu supaya cabang "dimatikan" tahu apakah
+        // timer perlu diaktifkan kembali.
+        var sebelumnya = _autoUpdateAktif;
         _autoUpdateAktif = e.Aktif;
         _autoUpdateBatal = false;
 
@@ -598,12 +610,15 @@ public class Worker : BackgroundService
 
         if (e.Aktif)
         {
-            // Sakelar baru dinyalakan: cek sekarang, jangan tunggu timer 6 jam.
+            // Selalu cek, bukan hanya saat berubah. CekPembaruanOtomatis
+            // punya _autoUpdateLock.WaitAsync(0), jadi panggilan berulang
+            // dari reconnect aman — yang kedua langsung kembali.
             _ = CekPembaruanOtomatis(_cts?.Token ?? default);
         }
-        // Sakelar dimatikan TIDAK membuat apa-apa. Kalau sedang mengunduh, proses
-        // yang sedang jalan menyelesaikan hashing-nya, lalu installation dicek
-        // ulang di bawah — dan `_autoUpdateAktif` sudah false, jadi berhenti.
+        else if (sebelumnya)
+        {
+            AgentLog.Write("Auto-update: sakelar dimatikan, timer 6 jam diaktifkan lagi");
+        }
     }
 
     /// <summary>
