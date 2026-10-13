@@ -667,6 +667,28 @@ public class Worker : BackgroundService
             {
                 // Berhasil bicara dengan server: agent sehat, reset penghitung.
                 _autoUpdateGagalBeruntun = 0;
+
+                // 🔴 WAJIB lapor "diam" ke server.
+                //
+                // Tanpa baris ini, PC yang sudah versi terbaru tetap
+                // berflag di server: menolak sesi, dilewati auto-shutdown, dan
+                // tidak akan pernah update. Terverifikasi langsung di
+                // produksi 13 Okt -- flag menyala, persen 0, tidak terjadi
+                // apa-apa, dan tidak ada jalan keluar selain Halaman PC.
+                //
+                // Operator memang bisa menandai PC yang sudah paling baru, dan
+                // "menyerah karena tidak ada yang perlu diunduh" harus berarti
+                // "berhenti", bukan "menahan PC tanpa alasan".
+                if (keputusan == KeputusanUpdate.Diam)
+                {
+                    AgentLog.Write(
+                        $"Auto-update: PC sudah versi terbaru ({versiLokal ?? "tidak diketahui"}) — flag dilepas");
+                    LaporkanProgres("diam", null);
+                    _autoUpdateAktif = false;
+                    AturTimerAutoUpdate();
+                    return;
+                }
+
                 if (keputusan == KeputusanUpdate.VersiTidakSah)
                 {
                     AgentLog.Write(
@@ -737,6 +759,24 @@ public class Worker : BackgroundService
             {
                 HapusBerkas(berkas);
                 AgentLog.Write("Auto-update: kondisi PC berubah saat mengunduh — dipasang");
+                return;
+            }
+
+            // 🔴 Countdown TERLETAK DI SINI, sebelum msiexec — bukan sesudah.
+            //
+            // ForceReboot membuat MSI me-restart PC begitu selesai, jadi kalau
+            // countdown dikirim setelah msiexec, layarnya sudah hilang. Jeda ini
+            // juga memberi kesempatan terakhir untuk membatalkan.
+            AgentLog.Write(
+                $"Auto-update: installing in {AutoUpdater.HitungMundurRestartDetik} seconds.");
+            LaporkanProgres("restart", null);
+            await Task.Delay(AutoUpdater.HitungMundurRestartDetik * 1000, cancel);
+
+            if (_autoUpdateBatal)
+            {
+                HapusBerkas(berkas);
+                AgentLog.Write("Auto-update: dibatalkan teknisi saat hitung mundur");
+                _autoUpdateAktif = false;
                 return;
             }
 

@@ -214,6 +214,10 @@ public static class AutoUpdater
             "pasang" => 90,
             "selesai" => 100,
             "gagal" => 100,
+            // ⚠️ "diam" memakai 100 karena bukan tahap yang sedang berjalan.
+            // Yang penting pesannya: agent sudah mengecek dan tidak ada yang
+            // perlu diunduh.
+            "diam" => 100,
             _ => 0,
         };
 
@@ -224,6 +228,7 @@ public static class AutoUpdater
             "pasang" => "Memasang pembaruan. Jangan matikan PC ini.",
             "selesai" => "Pembaruan selesai. PC akan restart sebentar lagi.",
             "gagal" => "Pembaruan gagal. PC tidak direstart, hubungi teknisi.",
+            "diam" => "PC ini sudah versi terbaru.",
             _ => "Menyiapkan pembaruan...",
         };
 
