@@ -179,6 +179,29 @@ public sealed class AutoUpdateConfigPayload
     public bool Aktif { get; set; }
 }
 
+/// <summary>
+/// Laporan progres pembaruan otomatis dari agent ke server.
+/// </summary>
+/// <remarks>
+/// ⚠️ Server memakai angka ini untuk mengisi badge di Halaman PC. Jadi
+/// <see cref="Persen"/> WAJIB dikunci 0..100 di agent — server tidak menyaring,
+/// dan angka 130% di layar operator terlihat seperti file rusak.
+/// </remarks>
+public sealed class AutoUpdateProgressPayload
+{
+    [JsonPropertyName("pcId")]
+    public string PcId { get; set; } = "";
+
+    [JsonPropertyName("agentToken")]
+    public string AgentToken { get; set; } = "";
+
+    [JsonPropertyName("pesan")]
+    public string Pesan { get; set; } = "";
+
+    [JsonPropertyName("persen")]
+    public int Persen { get; set; }
+}
+
 /// <summary>Balasan ack <c>client:create_password</c> dari server.</summary>
 /// <remarks>
 /// Mengikuti <see cref="ClientLoginResultPayload"/>: nama C# untuk pembaca di

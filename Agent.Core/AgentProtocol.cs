@@ -23,6 +23,16 @@ public static class AgentEvents
     public const string SessionStart = "session:start";
     public const string SessionTick = "session:tick";
     public const string SessionStop = "session:stop";
+    public const string AutoUpdateConfig = "agent:auto_update_config";
+
+    /// <summary>Laporan progres pembaruan, agent ke server.</summary>
+    /// <remarks>
+    /// ⚠️ Event ini hanya boleh dikirim agent PC yang PC-nya sedang berflag
+    /// auto-update. Server memeriksa pcId + agentToken seperti event agent lain,
+    /// jadi nilainya bukanRahasia seperti JWT operator, tapi tetap tidak boleh
+    /// dipakai untuk menulis status PC orang lain.
+    /// </remarks>
+    public const string AutoUpdateProgress = "agent:auto_update_progress";
 
     // ---------- key payload (camelCase, sinkron gateway NestJS) ----------
     public const string KeyPcId = "pcId";
@@ -34,4 +44,7 @@ public static class AgentEvents
     public const string KeySessionId = "sessionId";
     public const string KeyDurasiDetik = "durasiDetik";
     public const string KeySisaDetik = "sisaDetik";
+    public const string KeyAktif = "aktif";
+    public const string KeyPesan = "pesan";
+    public const string KeyPersen = "persen";
 }

@@ -71,6 +71,30 @@ public static class AutoUpdater
     public static readonly TimeSpan JedaPercobaan = TimeSpan.FromHours(1);
 
     /// <summary>
+    /// Berapa kali percobaan boleh gagal sebelum agent berhenti sendiri.
+    /// </summary>
+    /// <remarks>
+    /// Dua kali, bukan "coba terus". Mati listrik atau restart manual di tengah
+    /// unduhan tidak boleh membuat PC kembali normal lalu menyalakan update
+    /// berulang setiap 6 jam — itu yang membuat MSI rusak terasa seperti
+    /// "PC nyala sendiri terus".
+    ///
+    /// Setelah batas ini, flag di server TIDAK dilepas sendiri. Operator tetap
+    /// memegang kendali: PC tidak bisa dilogin, dan itu lebih baik daripada
+    /// update berulang yang membanjiri server tanpa pernah berhasil.
+    /// </remarks>
+    public const int MaksPercobaanGagal = 2;
+
+    /// <summary>
+    /// Hitung mundur sebelum restart paksa.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ Pasang tanpa jeda sama sekali membuat pelanggan kehilangan berkasnya
+    /// tanpa sempat menyimpan. Sepuluh detik cukup untuk menjangkau tombol simpan.
+    /// </remarks>
+    public const int HitungMundurRestartDetik = 10;
+
+    /// <summary>
     /// Putuskan apa yang harus dilakukan berdasarkan balasan server + kondisi PC.
     /// </summary>
     /// <param name="versiLokal">Versi MSI yang terpasang di PC ini.</param>
@@ -148,6 +172,77 @@ public static class AutoUpdater
             if (x != y) return x.CompareTo(y);
         }
         return 0;
+    }
+
+    /// <summary>
+    /// Apakah agent masih boleh mencoba lagi setelah beberapa kegagalan.
+    /// </summary>
+    /// <param name="gagalBeruntun">Berapa kali percobaan terakhir gagal.</param>
+    /// <param name="sejakPercobaanTerakhir">Selisih waktu sejak percobaan terakhir.</param>
+    /// <remarks>
+    /// Fungsi murni supaya batas dua percobaan bisa diuji tanpa registry, tanpa
+    /// timer, dan tanpa menunggu satu jam.
+    /// </remarks>
+    public static bool MasihBolehPercobaan(int gagalBeruntun, TimeSpan sejakPercobaanTerakhir)
+    {
+        if (gagalBeruntun <= 0) return true;
+        if (gagalBeruntun >= MaksPercobaanGagal) return false;
+        return sejakPercobaanTerakhir >= JedaPercobaan;
+    }
+
+    /// <summary>
+    /// Pesan yang harus tampil ke pengguna, sesuai tahap yang sedang berjalan.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ Satu fungsi untuk semua tahap, karena tiap tahap memakai kalimat
+    /// berbeda, dan menyalin rumus ini ke beberapa tempat sudah pernah
+    /// menghasilkan dua layar yang berbeda untuk keadaan yang sama.
+    /// Persentase DIBATAS 0..100 — nilai server bisa saja lebih besar kalau
+    /// ada bug di sana, dan angka 130% di layar operator terlihat seperti
+    /// file rusak.
+    /// </remarks>
+    public static (int Persen, string Pesan) TahapProgress(string tahap, double? rasioUnduhan)
+    {
+        // Unduhan menempati 70% pertama karena itu satu-satunya tahap yang
+        // progress-nya bisa benar-benar diukur. Hashing dan msiexec tidak
+        // melaporkan progress, jadi mengestimasinya berarti menampilkan angka
+        // yang tidak berasal dari mana pun.
+        var persen = tahap switch
+        {
+            "unduh" => RasioKePersen(rasioUnduhan, 5, 70),
+            "verifikasi" => 75,
+            "pasang" => 90,
+            "selesai" => 100,
+            "gagal" => 100,
+            _ => 0,
+        };
+
+        var pesan = tahap switch
+        {
+            "unduh" => "Mengunduh pembaruan...",
+            "verifikasi" => "Memeriksa keutuhan berkas...",
+            "pasang" => "Memasang pembaruan. Jangan matikan PC ini.",
+            "selesai" => "Pembaruan selesai. PC akan restart sebentar lagi.",
+            "gagal" => "Pembaruan gagal. PC tidak direstart, hubungi teknisi.",
+            _ => "Menyiapkan pembaruan...",
+        };
+
+        return (Math.Clamp(persen, 0, 100), pesan);
+    }
+
+    /// <summary>Naikkan rasio 0..1 menjadi rentang persen tertentu.</summary>
+    private static int RasioKePersen(double? rasio, int dari, int sampai)
+    {
+        if (rasio is null || double.IsNaN(rasio.Value)) return dari;
+        var b = Math.Clamp(rasio.Value, 0d, 1d);
+
+        // ⚠️ MidpointRounding.AwayFromZero itu WAJIB, bukan bawaan.
+        //
+        // Math.Round(32.5) bawaan .NET memakai banker's rounding dan
+        // menghasilkan 32, bukan 33. Untuk progress bar itu berarti angka
+        // melompat melingkar di titik tengah dan-naik-turun di detik yang
+        // sama — persis gerakan yang membuat orang mengira program macet.
+        return dari + (int)Math.Round((sampai - dari) * b, MidpointRounding.AwayFromZero);
     }
 
     /// <summary>

@@ -298,7 +298,7 @@ public sealed class ServerConnection : IAsyncDisposable
             return Task.CompletedTask;
         });
 
-        // Status sakelar auto-update. Dibaca juga saat register, supaya agent
+    // Status sakelar auto-update. Dibaca juga saat register, supaya agent
         // yang baru konek langsung tahu apakah fiturnya boleh jalan.
         client.On("agent:auto_update_config", ctx =>
         {
@@ -721,7 +721,49 @@ public sealed class ServerConnection : IAsyncDisposable
         }
     }
 
-    private void StartHeartbeat()
+    /// <summary>
+    /// Kirim laporan progres pembaruan ke server.
+    /// </summary>
+    /// <remarks>
+    /// TIDAK melempar dan tidak di-await pemanggil. Progres bersifat kosmetik:
+    /// kalau socket sedang bermasalah, yang hilang hanya badge di Halaman PC,
+    /// bukan alur update-nya. Melempar di sini akan menghentikan unduhan
+    /// MSI 89 MB hanya karena satu emit gagal.
+    /// </remarks>
+    public void KirimAutoUpdateProgress(string pesan, int persen)
+    {
+        if (string.IsNullOrWhiteSpace(_pcId)) return;
+        var clamped = Math.Clamp(persen, 0, 100);
+        try
+        {
+        // ⚠️ Pakai `IsConnected` milik kelas ini, BUKAN `client.Connected`.
+        // `Connected` pernah macet true sementara WebSocket-nya sudah mati --
+        // kelas itu sudah memperbaikinya dengan `_socketMati` dan `SudahStale`.
+        if (!IsConnected) return;
+        var client = _client;
+        if (client == null) return;
+            // Fire-and-forget, lihat catatan di atas.
+            // ⚠️ Bungkus payload ke dalam object[]: overload EmitAsync yang
+            // menerima IEnumerable<object> tidak menerima kelas langsung, dan
+            // kesalahan itu hanya muncul saat kompilasi.
+            _ = client.EmitAsync(AgentEvents.AutoUpdateProgress, new object[]
+            {
+                new AutoUpdateProgressPayload
+                {
+                    PcId = _pcId,
+                    AgentToken = _agentToken,
+                    Pesan = pesan,
+                    Persen = clamped,
+                },
+            });
+        }
+        catch (Exception ex)
+        {
+            AgentLog.Write($"Auto-update: gagal kirim progres ({ex.Message})");
+        }
+    }
+
+        private void StartHeartbeat()
     {
         lock (_heartbeatLock)
         {

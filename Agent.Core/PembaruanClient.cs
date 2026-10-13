@@ -96,7 +96,8 @@ public sealed class PembaruanClient : IDisposable
     public async Task<string?> UnduhAsync(
         string? versi,
         long? ukuranHarapan,
-        CancellationToken cancel = default)
+        CancellationToken cancel = default,
+        IProgress<double>? progres = null)
     {
         string? path = null;
         try
@@ -118,10 +119,44 @@ public sealed class PembaruanClient : IDisposable
                 c => char.IsAsciiLetterOrDigit(c) || c == '.'));
             path = Path.Combine(folder, $"v3netbill-{aman}.msi");
 
+            // ⚠️ Content-Length sering TIDAK ada di respons server ini, jadi
+            // copy polos tidak bisa mengukur apa pun. Yang dipakai untuk
+            // persentase adalah `ukuranHarapan` yang sudah diketahui dari
+            // balasan `cek-pembaruan` -- bukan tebakan.
+            var total = ukuranHarapan is > 0
+                ? ukuranHarapan.Value
+                : res.Content.Headers.ContentLength ?? 0L;
+
             await using (var asal = await res.Content.ReadAsStreamAsync(cancel))
             await using (var tujuan = File.Create(path))
             {
-                await asal.CopyToAsync(tujuan, cancel);
+                if (total <= 0)
+                {
+                    await asal.CopyToAsync(tujuan, cancel);
+                }
+                else
+                {
+                    var buffer = new byte[81920];
+                    long terbaca = 0;
+                    var terakhir = -1L;
+                    int n;
+                    while ((n = await asal.ReadAsync(buffer, cancel)) > 0)
+                    {
+                        await tujuan.WriteAsync(buffer.AsMemory(0, n), cancel);
+                        terbaca += n;
+
+                        // ⚠️ Laporan dibatasi satu kali per persen. Tanpa itu,
+                        // unduhan 89 MB menghasilkan ribuan laporan, dan tiap
+                        // laporan jadi satu emit ke server plus satu pipe ke
+                        // overlay.
+                        var persen = terbaca * 100 / total;
+                        if (persen != terakhir)
+                        {
+                            terakhir = persen;
+                            progres?.Report(Math.Clamp((double)terbaca / total, 0d, 1d));
+                        }
+                    }
+                }
             }
 
             // Ukuran hanya pagar cepat: berkas terpotong biasanya punya ukuran

@@ -30,6 +30,7 @@ internal enum PipeMessageType
     OtpResult = 8,          // Hasil permintaan OTP (berhasil/gagal + pesan)
     CreatePasswordResult = 9, // Hasil permintaan buat/ganti password
     PowerResult = 10,        // Hasil permintaan restart/mematikan PC
+    UpdateProgress = 11,       // Progres pembaruan otomatis (pesan, persen)
 
     // Overlay → Service
     LoginRequest = 100,     // Login request (kode, password)
@@ -38,7 +39,8 @@ internal enum PipeMessageType
     StopSessionRequest = 103, // Overlay minta hentikan sesi yang berjalan (stop sendiri)
     OtpRequest = 104,       // Overlay minta kirim OTP ke Telegram
     CreatePasswordRequest = 105, // Overlay minta dibuatkan password baru untuk sebuah kode
-    PowerRequest = 106      // Overlay minta restart / matikan PC ini
+    PowerRequest = 106,      // Overlay minta restart / matikan PC ini
+    BatalUpdateRequest = 107 // Teknisi membatalkan pembaruan yang sedang berjalan
 }
 
 internal record PipeMessage(PipeMessageType Type, string Payload);
@@ -59,6 +61,16 @@ public class Worker : BackgroundService
         private Timer? _nextcloudTimer;
     private Timer? _autoUpdateTimer;
     private bool _autoUpdateAktif;
+    private volatile bool _autoUpdateBatal;
+    /// <summary>Penanda timer berkala sedang dimatikan.</summary>
+    /// <remarks>
+    /// <c>System.Threading.Timer</c> tidak punya properti <c>Enabled</c>, jadi
+    /// statusnya harus disimpan sendiri. Tanpa penanda ini, menyalakan ulang
+    /// timer setelah flag dimatikan tidak bisa dibedakan dari tidak pernah
+    /// dimatikan — dan hasilnya timer yang dijadwalkan dua kali.
+    /// </remarks>
+    private bool _timerAutoUpdateMati;
+    private volatile string _autoUpdateTahap = "";
     private int _autoUpdateGagalBeruntun;
     // ⚠️ WAJIB ada. Tanpa ini, timer 6 jam dan event dari server bisa masuk
     // bersamaan lalu dua msiexec jalan bersamaan untuk satu MSI yang sama —
@@ -196,6 +208,20 @@ public class Worker : BackgroundService
             null,
             TimeSpan.FromMinutes(30),
             TimeSpan.FromHours(6));
+
+        // ⚠️ Baca flag dari registry SEBELUM timer dipasang.
+        //
+        // Mati listrik di tengah unduhan berarti service mati mendadak, dan
+        // tanpa registry flag yang ada hanya di memori hilang bersama proses.
+        // PC lalu kembali normal, update tidak dilanjutkan, dan operator
+        // mengira update sudah berjalan padahal tidak pernah selesai.
+        _autoUpdateAktif = BacaAutoUpdateDariRegistry();
+        if (_autoUpdateAktif)
+        {
+            AgentLog.Write("Auto-update: flag ditemukan di registry — dilanjutkan setelah start");
+            // 🔴 Timer berkala DINONAKTIFKAN selama flag nyala (lihat AturTimerAutoUpdate).
+        }
+        AturTimerAutoUpdate();
 
         // Keep alive until cancellation
         try
@@ -351,6 +377,18 @@ public class Worker : BackgroundService
         // Sequential: StateUpdate (locked=true) dulu, baru pesan alasan.
         await SendStateUpdateAsync();
         await SendToOverlayAsync(new PipeMessage(PipeMessageType.SessionStopped, JsonConvert.SerializeObject(new { alasan = e.Payload.Alasan })));
+
+        // 🔴 Ini yang membuat toggle per-PC berguna. Tanpa baris ini, update
+        // hanya berjalan kalau timer 6 jam kebetulan jatuh — operator
+        // menyalakan flag lalu menunggu tidak tahu berapa lama.
+        //
+        // Baris ini TIDAK awaits: method ini async void, jadi await di sini
+        // menahan event handler. Dan ceknya `SesiSedangBerjalan()` yang baru
+        // di atas sudah membaca _stateLock, yang di atas sudah dilepas.
+        if (_autoUpdateAktif)
+        {
+            _ = CekPembaruanOtomatis(_cts?.Token ?? default);
+        }
     }
 
     /// <summary>Dashboard/backend memerintahkan kunci layar PC sekarang (di luar alur sesi).</summary>
@@ -531,8 +569,15 @@ public class Worker : BackgroundService
 
         if (_autoUpdateAktif == e.Aktif) return;
         _autoUpdateAktif = e.Aktif;
+        _autoUpdateBatal = false;
 
         AgentLog.Write($"Auto-update {(e.Aktif ? "DINYALAKAN" : "dimatikan")} dari server");
+
+        // 🔴 WAJIB setiap kali status berubah, BUKAN hanya saat dinyalakan.
+        // Mematikan flag harus mengembalikan timer 6 jam; tanpa baris ini PC
+        // yang pernah diberi flag tidak akan pernah ikut timer lagi seumur
+        // program.
+        AturTimerAutoUpdate();
 
         if (e.Aktif)
         {
@@ -571,11 +616,30 @@ public class Worker : BackgroundService
 
         try
         {
-            // Jeda setelah kegagalan. Tanpa ini satu MSI yang rusak akan dicoba
-            // ulang terus tiap 6 jam selama PC menyala.
-            if (_autoUpdateGagalBeruntun > 0 &&
-                DateTime.UtcNow - BacaPercobaanTerakhir() < AutoUpdater.JedaPercobaan)
+            // 🔴 Batas percobaan DAN jeda, dua-duanya wajib.
+            //
+            // Tanpa batas dua kali, satu MSI yang rusak akan dicoba ulang
+            // setiap 6 jam selama PC menyala — dan operator akan melihat
+            // "PC nyala sendiri terus" tanpa pernah paham kenapa. Setelah
+            // batas kedua, agent berhenti dan melapor; flag di server sengaja
+            // TIDAK dilepas supaya operator pegang kendali.
+            if (!AutoUpdater.MasihBolehPercobaan(
+                    _autoUpdateGagalBeruntun, DateTime.UtcNow - BacaPercobaanTerakhir()))
             {
+                if (_autoUpdateGagalBeruntun >= AutoUpdater.MaksPercobaanGagal)
+                {
+                    LaporkanProgres("gagal", null);
+                    AgentLog.Write(
+                        $"Auto-update: BERHENTI setelah {_autoUpdateGagalBeruntun}x gagal. " +
+                        "Menunggu operator — flag di server sengaja tidak dilepas.");
+                }
+                return;
+            }
+
+            if (_autoUpdateBatal)
+            {
+                AgentLog.Write("Auto-update: dibatalkan teknisi");
+                _autoUpdateAktif = false;
                 return;
             }
 
@@ -611,7 +675,27 @@ public class Worker : BackgroundService
                 $"Auto-update: versi {info.Versi} tersedia (terpasang {versiLokal ?? "tidak diketahui"}). Mengunduh...");
             SimpanPercobaanTerakhir();
 
-            var berkas = await klien.UnduhAsync(info.Versi, info.UkuranBytes, cancel);
+            LaporkanProgres("unduh", 0d);
+
+            var berkas = await klien.UnduhAsync(
+                info.Versi, info.UkuranBytes, cancel,
+                new Progress<double>(r =>
+                {
+                    // ⚠️ Hanya dilompati kalau tahapnya masih "unduh".
+                    // Unduhan bisa selesai setelah operator menekan batal, dan
+                    // laporan "unduh" yang telat akan mengubah layar dari
+                    // "dibatalkan" kembali jadi "sedang mengunduh".
+                    if (_autoUpdateTahap == "unduh") LaporkanProgres("unduh", r);
+                }));
+
+            if (_autoUpdateBatal)
+            {
+                HapusBerkas(berkas);
+                AgentLog.Write("Auto-update: dibatalkan teknisi saat mengunduh");
+                _autoUpdateAktif = false;
+                return;
+            }
+
             if (berkas == null)
             {
                 CatatGagalUpdate("unduhan gagal");
@@ -622,6 +706,7 @@ public class Worker : BackgroundService
             // akan membuat msiexec memasang apa saja ke PC ini.
             if (!string.IsNullOrWhiteSpace(info.Sha256))
             {
+                LaporkanProgres("verifikasi", null);
                 var hash = await HitungSha256Async(berkas, cancel);
                 if (!string.Equals(hash, info.Sha256, StringComparison.OrdinalIgnoreCase))
                 {
@@ -651,7 +736,8 @@ public class Worker : BackgroundService
                 return;
             }
 
-            AgentLog.Write("Auto-update: memasang MSI (msiexec /qn)...");
+            LaporkanProgres("pasang", null);
+            AgentLog.Write("Auto-update: memasang MSI (msiexec /qn, ForceReboot=1)...");
             if (!PasangInstaller(berkas))
             {
                 HapusBerkas(berkas);
@@ -664,6 +750,7 @@ public class Worker : BackgroundService
             // msiexec selesai. Itu normal, bukan tanda kegagalan.
             AgentLog.Write("Auto-update: msiexec selesai tanpa menghentikan service.");
             _autoUpdateGagalBeruntun = 0;
+            LaporkanProgres("selesai", null);
         }
         catch (OperationCanceledException)
         {
@@ -682,7 +769,80 @@ public class Worker : BackgroundService
 
     /// <summary>
     /// PC boleh diperbarui sekarang? Semua syarat wajib terpenuhi.
+    /// <summary>
+    /// Nyalakan atau matikan timer berkala 6 jam.
     /// </summary>
+    /// <remarks>
+    /// <b>Timer WAJIB dimatikan selama flag auto-update nyala.</b>
+    ///
+    /// Tanpa penjaga ini, timer 6 jam bisa menyalakan update KEDUA sementara
+    /// yang pertama belum selesai memasang: versi di server masih lebih baru
+    /// karena MSI baru belum terpasang, dan msiexec yang pertama masih
+    /// berjalan. Dua proses msiexec sekaligus berarti instalasi gagal setengah
+    /// jalan, dan flag di server sudah terlanjur menandai "update sedang
+    /// berjalan".
+    ///
+    /// Yang memicu update selama flag nyala hanya perintah server dan session
+    /// yang baru berhenti — bukan waktu.
+    /// </remarks>
+    private void AturTimerAutoUpdate()
+    {
+        if (_autoUpdateTimer == null) return;
+        try
+        {
+            if (_autoUpdateAktif)
+            {
+                // Tidak ada periode selama flag nyala. Yang memicu update
+                // hanya perintah server dan session yang baru berhenti.
+                _autoUpdateTimer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+                _timerAutoUpdateMati = true;
+                AgentLog.Write("Auto-update: timer berkala 6 jam DINONAKTIFKAN selama flag nyala");
+            }
+            else if (_timerAutoUpdateMati)
+            {
+                _autoUpdateTimer.Change(TimeSpan.FromMinutes(30), TimeSpan.FromHours(6));
+                _timerAutoUpdateMati = false;
+                AgentLog.Write("Auto-update: timer berkala 6 jam diaktifkan lagi");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Gagal mengatur timer auto-update");
+        }
+    }
+
+    /// <summary>Baca flag auto-update dari registry (bertahan melewati restart).</summary>
+    private static bool BacaAutoUpdateDariRegistry()
+    {
+        var nilai = BacaReg("AutoUpdateEnabled", null);
+        return string.Equals(nilai, "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Kirim progres ke DUA pihak: overlay lewat pipe, server lewat socket.
+    /// </summary>
+    /// <remarks>
+    /// <b>Overlay harus diberi laporan, bukan server saja.</b> Orang yang
+    /// duduk di depan PC adalah orang yang pertama perlu tahu sedang ada
+    /// "--PC sedang diperbarui, jangan dimatikan".
+    ///
+    /// Tanpa laporan, overlay menampilkan layar login biasa sementara service
+    /// sedang memasang — dan orang itu bisa mengira PC-nya macet lalu menekan
+    /// tombol matikan.
+    /// </remarks>
+    private void LaporkanProgres(string tahap, double? rasioUnduhan)
+    {
+        var (persen, pesan) = AutoUpdater.TahapProgress(tahap, rasioUnduhan);
+        _autoUpdateTahap = tahap;
+
+        // Pipe dulu: overlay adalah yang dilihat orang di depan PC.
+        _ = SendToOverlayAsync(new PipeMessage(
+            PipeMessageType.UpdateProgress,
+            Newtonsoft.Json.JsonConvert.SerializeObject(new { pesan, persen, tahap })));
+
+        _serverConnection?.KirimAutoUpdateProgress(pesan, persen);
+    }
+
     private bool BolehUpdate()
     {
         if (SesiSedangBerjalan())
@@ -753,7 +913,18 @@ public class Worker : BackgroundService
             var psi = new ProcessStartInfo
             {
                 FileName = "msiexec.exe",
-                Arguments = $"/i \"{path}\" /qn /norestart /l*v \"{log}\"",
+                // 🔴 ForceReboot=1 itu WAJIB, bukan tambahan.
+                //
+                // Tanpa itu, MSI selesai tetapi PC tidak restart. Akibatnya
+                // overlay masih versi lama, dan flag auto-update di server
+                // tidak pernah lepas karena versi agent tidak naik — PC
+                // terkunci selamanya: menolak sesi, tidak mau dimatikan
+                // otomatis, dan tidak bisa update.
+                //
+                // REBOOT=ReallySuppress dipakai bersamaan supaya restart
+                // dilakukan oleh MSI secara diam-diam, bukan lewat UI reboot
+                // Windows yang bisa menggantung di depan layar.
+                Arguments = $"/i \"{path}\" /qn /norestart REBOOT=ReallySuppress ForceReboot=1 /l*v \"{log}\"",
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
@@ -1171,6 +1342,12 @@ public class Worker : BackgroundService
         SetTaskManagerBlocked(true);
         await SendStateUpdateAsync();
         await SendToOverlayAsync(new PipeMessage(PipeMessageType.SessionStopped, JsonConvert.SerializeObject(new { alasan = "manual" })));
+        // Sama seperti di atas: sesi yang dihentikan dari PC ini juga harus
+        // langsung memicu update kalau PC-nya ditandai.
+        if (_autoUpdateAktif)
+        {
+            _ = CekPembaruanOtomatis(_cts?.Token ?? default);
+        }
     }
 
     private async Task<bool> SendStateUpdateAsync()
@@ -1354,6 +1531,24 @@ public class Worker : BackgroundService
                         };
                     if (otp == null) AgentLog.Write("Permintaan OTP gagal — OTP tidak dibuat");
                     await SendToOverlayAsync(new PipeMessage(PipeMessageType.OtpResult, JsonConvert.SerializeObject(res)));
+                    break;
+                }
+            case PipeMessageType.BatalUpdateRequest:
+                {
+                    // ⚠️ Batal TIDAK berarti kill. Unduhan 89 MB yang sudah
+                    // berjalan dibiarkan selesai, lalu dibuang sebelum
+                    // msiexec. Membunuh proses unduhan di tengah jalan
+                    // menyisakan berkas separuh di disk.
+                    _autoUpdateBatal = true;
+                    AgentLog.Write("Auto-update: teknisi menekan BATALKAN update");
+                    await SendToOverlayAsync(new PipeMessage(
+                        PipeMessageType.UpdateProgress,
+                        JsonConvert.SerializeObject(new
+                        {
+                            pesan = "Pembaruan dibatalkan teknisi.",
+                            persen = 0,
+                            tahap = "batal",
+                        })));
                     break;
                 }
             case PipeMessageType.StateRequest:
@@ -1653,7 +1848,11 @@ public class Worker : BackgroundService
     }
 
     /// <summary>Baca satu nilai string dari key registry agent.</summary>
-    private static string BacaReg(string nama, string bawaan)
+    /// <param name="bawaan">
+    /// Nilai kalau key tidak ada. <c>null</c> berarti pemanggil SEDANG TANYA
+    /// APAKAH ADA — beda dari "tidak ada, pakai string kosong".
+    /// </param>
+    private static string? BacaReg(string nama, string? bawaan)
     {
         try
         {
