@@ -619,13 +619,13 @@ public class Worker : BackgroundService
         {
             AgentLog.Write("Auto-update: sakelar dimatikan, timer 6 jam diaktifkan lagi");
 
-            // 🔴 Kartu di overlay harus ikut ditutup.
-            //
-            // Operator membatalkan tandaan dari Halaman PC berarti PC boleh
-            // dipakai lagi. Kalau kartu 100% dibiarkan menggantung, kasir
-            // mengira PC masih terkunci padahal sudah tidak — dan yang melihat
-            // hanyalah pesan di layar, bukan isi database.
+            // Pesan terakhir dibuang supaya overlay yang konek lagi tidak
+            // memutar ulang progres yang sudah usang. Reboot sekaligus
+            // membersihkan overlay yang mungkin sedang menampilkannya.
             LaporkanProgres("tutup", null);
+            _autoUpdatePesanTerakhir = "";
+            _autoUpdatePersenTerakhir = 0;
+            RestartBersih("Tandaan pembaruan dibatalkan, restart segar");
         }
     }
 
@@ -719,9 +719,24 @@ public class Worker : BackgroundService
                 {
                     AgentLog.Write(
                         $"Auto-update: PC sudah versi terbaru ({versiLokal ?? "tidak diketahui"}) — flag dilepas");
+
+                    // 🔴 REBOOT PENUH, bukan sekadar menutup kartu lewat pesan.
+                    //
+                    // Pendekatan pesan rapuh dan sudah gagal dua kali: kartu
+                    // progres lama tetap tampil karena service masih menyimpan
+                    // pesan terakhir, dan registry masih menandai flag nyala
+                    // setelah update selesai. Choreography memindahkan state ke
+                    // tiga tempat yang harus sepakat.
+                    //
+                    // Reboot membuat semuanya segar sekaligus: memori kosong,
+                    // overlay versi baru, dan pesan terakhir hilang. Yang
+                    // menentukan adalah keadaannya, bukan susunan pesan.
                     LaporkanProgres("diam", null);
                     _autoUpdateAktif = false;
+                    _autoUpdatePesanTerakhir = "";
+                    _autoUpdatePersenTerakhir = 0;
                     AturTimerAutoUpdate();
+                    RestartBersih("PC sudah versi terbaru, restart segar");
                     return;
                 }
 
@@ -2058,6 +2073,44 @@ public class Worker : BackgroundService
     /// keduanya dari sumber yang sama, jadi kalau MSI mengganti berkasnya,
     /// versi keduanya pasti berbeda — dan kalau tidak diganti, pasti sama.
     /// </remarks>
+    /// <summary>
+    /// Restart Windows lewat service, dengan jeda supaya pesan terakhir sempat
+    /// tampil di overlay.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ Service jalan sebagai LocalSystem, jadi perintah <c>shutdown</c> sah
+    /// di sini. Dari overlay (user biasa) perintah yang sama akan berakhir
+    /// "Access is denied".
+    ///
+    /// ⚠️ Jeda 10 detik, bukan langsung. Tanpa jeda, pesan "PC sudah versi
+    /// terbaru" tidak pernah terlihat — PC gelap sebelum orang sempat membaca.
+    ///
+    /// ⚠️ Hanya dipakai dari jalur yang sudah memastikan PC terkunci dan tidak
+    /// ada sesi. Restart mendadak di tengah sesi memutus penagihan tanpa
+    /// mengembalikan sisa waktu ke voucher.
+    /// </remarks>
+    private void RestartBersih(string alasan)
+    {
+        try
+        {
+            AgentLog.Write($"Auto-update: restart bersih dijadwalkan — {alasan}");
+            Process.Start(new ProcessStartInfo(
+                "shutdown",
+                "/r /f /t 10 /c \"v3netbill: " + alasan + "\"")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            // Kegagalan di sini TIDAK boleh menjatuhkan service. Yang penting
+            // flag sudah dilepas; PC tetap bisa dipakai, hanya tampilannya
+            // belum segar sampai reboot manual berikutnya.
+            AgentLog.Write(ex, "Gagal menjadwalkan restart bersih");
+        }
+    }
+
     private bool VersiOverlayBerbedaDariAgent()
     {
         try
