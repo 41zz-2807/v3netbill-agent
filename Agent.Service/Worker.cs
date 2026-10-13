@@ -864,11 +864,20 @@ public class Worker : BackgroundService
         {
             if (_autoUpdateAktif)
             {
-                // Tidak ada periode selama flag nyala. Yang memicu update
-                // hanya perintah server dan session yang baru berhenti.
-                _autoUpdateTimer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
-                _timerAutoUpdateMati = true;
-                AgentLog.Write("Auto-update: timer berkala 6 jam DINONAKTIFKAN selama flag nyala");
+                // 🔴 Timer TIDAK boleh dimatikan total. Flag ON + timer mati =
+                // deadlock setelah kegagalan: cooldown 1 jam tidak pernah
+                // berakhir karena tidak ada yang memicu pengecekan, dan flag
+                // tetap ON selamanya. Terverifikasi 13 Okt: unduhan gagal,
+                // dua reboot, flag tetap "dilanjutkan", tapi tidak ada percobaan
+                // ulang sama sekali.
+                //
+                // Timer tetap jalan tiap 1 jam -- sama dengan JedaPercobaan --
+                // sebagai pengingat retry. CekPembaruanOtomatis punya
+                // _autoUpdateLock.WaitAsync(0), jadi panggilan ini tidak akan
+                // pernah tumpang tindih dengan unduhan yang sedang berjalan.
+                _autoUpdateTimer.Change(TimeSpan.FromHours(1), TimeSpan.FromHours(1));
+                _timerAutoUpdateMati = false;
+                AgentLog.Write("Auto-update: timer pengingat diatur tiap 1 jam selama flag nyala");
             }
             else if (_timerAutoUpdateMati)
             {
