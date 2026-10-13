@@ -212,6 +212,8 @@ public static class AutoUpdater
             "unduh" => RasioKePersen(rasioUnduhan, 5, 70),
             "verifikasi" => 75,
             "pasang" => 90,
+            // Hitung mundur restart: pemasangan belum tuntas, jadi jangan 100.
+            "restart" => 95,
             "selesai" => 100,
             "gagal" => 100,
             // ⚠️ "diam" memakai 100 karena bukan tahap yang sedang berjalan.
@@ -226,6 +228,7 @@ public static class AutoUpdater
             "unduh" => "Mengunduh pembaruan...",
             "verifikasi" => "Memeriksa keutuhan berkas...",
             "pasang" => "Memasang pembaruan. Jangan matikan PC ini.",
+            "restart" => "Pembaruan terpasang. PC akan restart sebentar lagi.",
             "selesai" => "Pembaruan selesai. PC akan restart sebentar lagi.",
             "gagal" => "Pembaruan gagal. PC tidak direstart, hubungi teknisi.",
             "diam" => "PC ini sudah versi terbaru.",

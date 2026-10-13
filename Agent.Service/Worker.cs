@@ -75,6 +75,19 @@ public class Worker : BackgroundService
     /// </remarks>
     private bool _timerAutoUpdateMati;
     private volatile string _autoUpdateTahap = "";
+
+    /// <summary>
+    /// Laporan progres terakhir, disimpan supaya bisa dikirim ULANG ke overlay
+    /// yang baru tersambung.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 Tanpa ini, overlay yang hidup belakangan tidak pernah tahu sedang ada
+    /// update — dan gejalanya persis seperti tidak ada fitur sama sekali.
+    /// Terverifikasi 13 Okt: update mulai 14:02:47, overlay baru tersambung
+    /// pipe 14:04:08, jadi semua progres sebelum itu hilang permanen.
+    /// </remarks>
+    private volatile string _autoUpdatePesanTerakhir = "";
+    private volatile int _autoUpdatePersenTerakhir;
     private int _autoUpdateGagalBeruntun;
     // ⚠️ WAJIB ada. Tanpa ini, timer 6 jam dan event dari server bisa masuk
     // bersamaan lalu dua msiexec jalan bersamaan untuk satu MSI yang sama —
@@ -878,6 +891,8 @@ public class Worker : BackgroundService
     {
         var (persen, pesan) = AutoUpdater.TahapProgress(tahap, rasioUnduhan);
         _autoUpdateTahap = tahap;
+        _autoUpdatePesanTerakhir = pesan;
+        _autoUpdatePersenTerakhir = persen;
 
         // Pipe dulu: overlay adalah yang dilihat orang di depan PC.
         _ = SendToOverlayAsync(new PipeMessage(
@@ -1618,6 +1633,10 @@ public class Worker : BackgroundService
             case PipeMessageType.StateRequest:
                 {
                     await SendStateUpdateAsync();
+                    // 🔴 Overlay yang baru konek harus diberi tahu kalau sedang
+                    // ada update. Tanpa ini, layar login tampil normal tepat
+                    // ketika PC sedang memasang MSI.
+                    await KirimUlangProgresUpdateKeOverlay();
                     // Overlay bisa connect terlambat, jadi status koneksi wajib ikut
                     // dikirim ulang — kalau tidak, indikator di card login stuck di
                     // "Menghubungkan ke server..." selamanya.
@@ -1773,6 +1792,34 @@ public class Worker : BackgroundService
         {
             _logger.LogError(ex, "PIN verify failed");
             return false;
+        }
+    }
+
+    /// <summary>Kirim ulang laporan progres terakhir ke overlay yang baru konek.</summary>
+    /// <remarks>
+    /// Polanya sama dengan <c>kirimUlangSesiKeAgent()</c>: overlay yang baru
+    /// hidup tidak boleh menunjukkan keadaan yang sudah berjalan. Dan sama seperti
+    /// method itu, penolanan di sini HARUS ditelan — pemanggilnya bukan await
+    /// di dalam handler yang lebih besar, dan satu kegagalan tidak boleh
+    /// menjatuhkan pipe untuk semua pesan berikutnya.
+    /// </remarks>
+    private async Task KirimUlangProgresUpdateKeOverlay()
+    {
+        try
+        {
+            if (!_autoUpdateAktif) return;
+            await SendToOverlayAsync(new PipeMessage(
+                PipeMessageType.UpdateProgress,
+                JsonConvert.SerializeObject(new
+                {
+                    pesan = _autoUpdatePesanTerakhir,
+                    persen = _autoUpdatePersenTerakhir,
+                    tahap = _autoUpdateTahap,
+                })));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Gagal mengirim ulang progres auto-update");
         }
     }
 

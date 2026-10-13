@@ -259,12 +259,12 @@ public partial class MainWindow : Window
     {
         try
         {
-            dynamic? data = JsonConvert.DeserializeObject(payload);
+            var data = JsonConvert.DeserializeObject<ProgresUpdatePayload>(payload);
             if (data == null) return;
 
-            var pesan = (string?)data.pesan;
-            var persen = (int?)data.persen ?? 0;
-            var tahap = (string?)data.tahap ?? "";
+            var pesan = data.Pesan;
+            var persen = data.Persen ?? 0;
+            var tahap = data.Tahap ?? "";
 
             // 🔴 DIJEIT. Payload datang lewat pipe dari service; kalau karena
             // suatu alasan nilainya di luar 0..100, Width dikali angka itu dan
@@ -276,14 +276,18 @@ public partial class MainWindow : Window
             // 🔴 WAJIB dipanggil SEBELUM apa pun. Tanpa baris ini, update bisa
             // berjalan tanpa panel sama sekali — pesan masuk, angka berubah,
             // tapi tidak ada yang menampilkan.
-            if (UpdatePanel.Visibility != Visibility.Visible) TampilkanPanelUpdate();
+            if (UpdateStrip.Visibility != Visibility.Visible) TampilkanStripUpdate();
 
             UpdatePesan.Text = string.IsNullOrWhiteSpace(pesan) ? "Menyiapkan pembaruan..." : pesan;
             UpdatePersen.Text = $"{persen}%";
-            UpdateBar.Width = LebarPanel * persen / 100.0;
+            UpdateBar.Width = LebarBarProgres() * persen / 100.0;
 
             // Hitung mundur hanya untuk tahap terakhir. Menampilkannya sejak
             // awal membuat orang mengira PC akan restart sekarang juga.
+            UpdateJudul.Text = tahap == "restart"
+                ? "PC AKAN RESTART"
+                : "SEDANG UPDATE BILLING";
+
             if (tahap == "restart")
             {
                 _hitungMundurRestart = HitungMundurAwal;
@@ -299,7 +303,7 @@ public partial class MainWindow : Window
             // yang bisa dilakukan dari layar ini.
             if (tahap is "batal" or "gagal")
             {
-                TutupPanelUpdate();
+                TutupStripUpdate();
             }
         }
         catch (Exception ex)
@@ -311,8 +315,20 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>Lebar isi panel update, dipakai untuk mengukur bar progres.</summary>
-    private const double LebarPanel = 360 - 48;
+    /// <summary>
+    /// Lebar bar progres dihitung dari lebar strip yang benar-benar tampil.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ Dihitung saat runtime, bukan konstanta. Strip menempel di atas dan
+    /// lebarnya mengikuti jendela — 800px saat fullscreen tapi hanya 340px di
+    /// mini window. Angka tetap akan meluber keluar strip di mini window, dan
+    /// karena Border tidak memotong, bar bisa terlihat keluar strip.
+    /// </remarks>
+    private double LebarBarProgres()
+    {
+        var lebar = UpdateStrip.ActualWidth;
+        return lebar > 0 ? lebar - 40 : 0; // kurangi margin kiri+kanan 20
+    }
 
     /// <summary>Awal hitung mundur sebelum restart paksa.</summary>
     private const int HitungMundurAwal = 10;
@@ -341,9 +357,9 @@ public partial class MainWindow : Window
     /// Karena itu panel dibuat tanpa tombol tutup, dan ESC tidak
     /// menutup apa pun selama ini terlihat.
     /// </remarks>
-    private void TampilkanPanelUpdate()
+    private void TampilkanStripUpdate()
     {
-        UpdatePanel.Visibility = Visibility.Visible;
+        UpdateStrip.Visibility = Visibility.Visible;
 
         // ⚠️ Tombol batal harus IKUT tampil. Versi pertama dibiarkan
         // Collapsed di XAML "supaya tidak repot di reset", dan hasilnya tidak
@@ -353,12 +369,12 @@ public partial class MainWindow : Window
         BatalUpdateButton.IsEnabled = true;
     }
 
-    private void TutupPanelUpdate()
+    private void TutupStripUpdate()
     {
         _hitungMundurRestartTicker?.Stop();
         _hitungMundurRestartTicker = null;
         UpdateHitungMundur.Visibility = Visibility.Collapsed;
-        UpdatePanel.Visibility = Visibility.Collapsed;
+        UpdateStrip.Visibility = Visibility.Collapsed;
         BatalUpdateButton.Visibility = Visibility.Collapsed;
         UpdateBar.Width = 0;
         _updateTahapTerakhir = "";
@@ -1107,4 +1123,14 @@ public partial class MainWindow : Window
     private record CreatePasswordResultPayload(bool Sukses, string? Pesan);
 
     private record PowerResultPayload(bool Sukses, string? Pesan);
+
+    /// <summary>Laporan progres pembaruan otomatis dari service.</summary>
+    /// <remarks>
+    /// ⚠️ Record bertipe, bukan `dynamic`. Versi pertama memakai dynamic dan
+    /// itu satu-satunya `dynamic` di seluruh file — seluruh handler lain pakai
+    /// record. Selain tidak konsisten, dynamic gagal saat runtime kalau
+    /// Microsoft.CSharp tidak ikut dipublish, dan gejalanya hanya satu baris di
+    /// log yang tidak pernah dibaca.
+    /// </remarks>
+    private record ProgresUpdatePayload(string? Pesan, int? Persen, string? Tahap);
 }
